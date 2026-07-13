@@ -1,0 +1,37 @@
+{
+  "name": "whatsapp-shell-bot",
+  "version": "1.1.0",
+  "description": "Production-ready bot (WhatsApp + SMS via Twilio) that executes pre-approved shell commands from pre-approved phone numbers. systemd service for Ubuntu 22.04+ / Debian 12+.",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/",
+    "test:whitelist": "node --test test/whitelist.test.js",
+    "test:router": "node --test test/router.test.js",
+    "test:sms": "node --test test/sms.test.js",
+    "syntax-check": "for f in src/*.js src/channels/*.js; do node --check \"$f\"; done"
+  },
+  "keywords": [
+    "whatsapp",
+    "sms",
+    "twilio",
+    "bot",
+    "shell",
+    "systemd",
+    "whitelist"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "qrcode-terminal": "^0.12.0",
+    "twilio": "^4.23.0",
+    "whatsapp-web.js": "^1.23.0",
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^4.7.1"
+  }
+}

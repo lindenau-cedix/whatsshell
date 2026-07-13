@@ -1,0 +1,83 @@
+[Unit]
+Description=WhatsApp + SMS Shell Bot
+Documentation=https://github.com/yourname/whatsapp-shell-bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wabot
+Group=wabot
+WorkingDirectory=/opt/whatsapp-shell-bot
+ExecStart=/usr/bin/node /opt/whatsapp-shell-bot/src/index.js
+Environment=NODE_ENV=production
+Environment=PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+Environment=WABOT_CONFIG=/opt/whatsapp-shell-bot/config.json
+
+# Optional: port override via /etc/default/whatsapp-shell-bot
+# (uncomment the next line if you want to override sms.httpPort without
+# editing config.json — useful for blue/green deploys behind the same proxy)
+# EnvironmentFile=/etc/default/whatsapp-shell-bot
+
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=whatsapp-shell-bot
+
+# --- Security hardening ---
+# No setuid binaries anywhere in our process tree.
+NoNewPrivileges=true
+
+# Isolated /tmp namespace.
+PrivateTmp=true
+
+# Filesystem hardening: /usr and /boot read-only, /etc read-only.
+ProtectSystem=strict
+
+# /home, /root, /run/user are unreachable.
+ProtectHome=true
+
+# Only these paths are writable.
+ReadWritePaths=/opt/whatsapp-shell-bot /var/log/whatsapp-shell-bot
+
+# Drop all capabilities — Chromium will need them re-added or run with
+# --no-sandbox. We keep the bounding set empty.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Disallow SUID/SGID bit execution.
+RestrictSUIDSGID=true
+
+# Disallow namespace creation (unshare, etc.).
+RestrictNamespaces=true
+
+# Disallow realtime scheduling.
+RestrictRealtime=true
+
+# Lock the process personality flag (no personality(2) calls).
+LockPersonality=true
+
+# Restrict socket families. We need INET/INET6 for WhatsApp + Twilio + the
+# local HTTP listener, and UNIX for chromium IPC. Anything else (netlink,
+# packet, …) is denied.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# NOTE: MemoryDenyWriteExecute=true is intentionally OMITTED.
+# Chromium/Puppeteer's V8 JIT requires W^X-disabled mappings at runtime,
+# so this would crash the browser. We rely on the rest of the hardening
+# (NoNewPrivileges, capability drop, no SUID) instead.
+
+# NOTE: IPAddressDeny is NOT used because the SMS HTTP server must be
+# reachable from the reverse proxy on 127.0.0.1. The reverse proxy is
+# the public attack surface, not this service.
+
+# Slightly relaxed system call filter — Chromium needs a wide syscall set,
+# and seccomp filtering at this level tends to break headless mode. We
+# compensate with the other sandboxing directives above.
+
+[Install]
+WantedBy=multi-user.target

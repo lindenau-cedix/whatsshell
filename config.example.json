@@ -1,0 +1,40 @@
+{
+  "whatsapp": {
+    "sessionPath": "/opt/whatsapp-shell-bot/.wwebjs_auth",
+    "qrRefreshSeconds": 20,
+    "qrTimeoutMinutes": 30,
+    "qrSmall": false
+  },
+  "sms": {
+    "enabled": false,
+    "twilioAccountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilioAuthToken": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilioPhoneNumber": "+491234567890",
+    "webhookPath": "/sms/inbound",
+    "httpPort": 3000,
+    "httpHost": "127.0.0.1",
+    "validateSignature": true,
+    "maxOutputChars": 1600,
+    "rateLimitPerMinute": 30
+  },
+  "whitelist": {
+    "numbers": ["491701234567"],
+    "commands": [
+      { "name": "uptime", "command": "uptime", "description": "Server-Uptime anzeigen" },
+      { "name": "disk", "command": "df -h", "description": "Festplattennutzung" },
+      { "name": "memory", "command": "free -h", "description": "RAM-Auslastung" },
+      { "name": "load", "command": "cat /proc/loadavg", "description": "System-Load anzeigen" },
+      { "name": "docker-ps", "command": "docker ps", "description": "Laufende Container" },
+      { "name": "reboot", "command": "systemctl reboot", "description": "Server neu starten" }
+    ]
+  },
+  "security": {
+    "timeoutMs": 30000,
+    "maxOutputChars": 4000,
+    "allowedFromGroups": false
+  },
+  "logging": {
+    "directory": "/var/log/whatsapp-shell-bot",
+    "retentionDays": 14
+  }
+}
