@@ -64,13 +64,23 @@ function assertTTY() {
 /**
  * Render a fresh QR code in the terminal, clearing the previous one.
  *
- * Decision: We use small=false and force a width of at least 80 columns so
- * the QR is genuinely scannable. The default qrcode-terminal output has a
- * configurable `small` mode but even that can be hard to scan from far
- * away — we keep the cells full-size and let the terminal wrap.
+ * Decision: default to qrcode-terminal's `small` mode. It draws each QR
+ * module with real Unicode half-block glyphs (▀ ▄ █), needs NO ANSI
+ * background-colour support, and is ~59 columns wide — so it fits inside a
+ * standard 80-column terminal without wrapping and stays visible regardless
+ * of the terminal's background colour.
+ *
+ * The wide mode (small=false) is deliberately NOT the default: it renders
+ * each module as a pair of ANSI-coloured spaces (`\x1b[47m  \x1b[0m`) with no
+ * printable glyphs, which means (a) it is invisible on light-background
+ * terminals or anywhere `\x1b[47m` is not honoured, and (b) it is ~118
+ * columns wide for a real WhatsApp payload, so it WRAPS and corrupts into an
+ * unscannable mess on an 80-column terminal. Callers may still opt into it,
+ * but only small mode is reliably scannable across terminals.
  */
 function renderQR(qrPayload, opts = {}) {
-  const small = opts.small === true;
+  // Default ON: only an explicit `small: false` selects the wide colour mode.
+  const small = opts.small !== false;
   // Clear screen so the previous QR doesn't ghost behind the new one.
   process.stdout.write(ANSI_CLEAR);
   process.stdout.write(`${ANSI_BOLD_CYAN}=== WhatsApp QR-Code ===${ANSI_RESET}\n`);
@@ -193,7 +203,10 @@ function wireAuthEvents(client, cfg) {
     if (now - lastQrTimestamp < 500) return;
     lastQrTimestamp = now;
 
-    renderQR(qr, { small: !!cfg.whatsapp.qrSmall });
+    // Pass the raw config value (not coerced): undefined falls through to
+    // renderQR's small-mode default; only an explicit `qrSmall: false` selects
+    // the wide colour mode.
+    renderQR(qr, { small: cfg.whatsapp.qrSmall });
     qrRendered = true;
 
     // Hard timeout — after 30 minutes give up.
@@ -248,6 +261,7 @@ function wireAuthEvents(client, cfg) {
 
 module.exports = {
   assertTTY,
+  renderQR,
   buildClient,
   wireAuthEvents,
 };

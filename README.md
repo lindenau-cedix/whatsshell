@@ -140,7 +140,7 @@ Restart nicht nötig.**
 | `whatsapp.sessionPath`              | string        | `.wwebjs_auth`   | Pfad für persistierte WhatsApp-Credentials |
 | `whatsapp.qrRefreshSeconds`         | number        | `20`             | (ungenutzt, Refresh wird von whatsapp-web.js gesteuert) |
 | `whatsapp.qrTimeoutMinutes`         | number        | `30`             | Nach dieser Zeit wird der QR-Prozess abgebrochen |
-| `whatsapp.qrSmall`                  | boolean       | `false`          | `true` → kleiner QR (kompakter, schlechter scanbar) |
+| `whatsapp.qrSmall`                  | boolean       | `true`           | `true` → kompakter QR aus Unicode-Blockzeichen (▀▄█), passt in 80 Spalten, überall sichtbar. `false` → breiter QR aus ANSI-Hintergrundfarben (~118 Spalten); bricht auf 80-Spalten-Terminals um und ist auf hellem Hintergrund unsichtbar. |
 | `sms.enabled`                       | boolean       | `false`          | SMS-Kanal aktivieren |
 | `sms.twilioAccountSid`              | string        | —                | Twilio Account SID (`AC…`) |
 | `sms.twilioAuthToken`               | string        | —                | Twilio Auth Token (geheim!) |

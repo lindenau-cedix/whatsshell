@@ -18,7 +18,60 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { buildClient } = require('../src/auth');
+const { buildClient, renderQR } = require('../src/auth');
+
+// Capture what renderQR draws. qrcode-terminal prints the QR via console.log
+// (no callback), while renderQR's own chrome (header, clear) goes through
+// process.stdout.write. We tap both and return the combined text.
+function captureRender(opts) {
+  const origLog = console.log;
+  const origWrite = process.stdout.write;
+  let out = '';
+  console.log = (...a) => {
+    out += a.join(' ') + '\n';
+  };
+  process.stdout.write = (chunk) => {
+    out += Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+    return true;
+  };
+  try {
+    // A representative whatsapp-web.js multi-device QR payload length.
+    renderQR('2@' + 'Ab3+/'.repeat(48), opts);
+  } finally {
+    console.log = origLog;
+    process.stdout.write = origWrite;
+  }
+  return out;
+}
+
+const BLOCK_GLYPHS = /[▀▄█]/; // ▀ ▄ █  — small (Unicode) mode
+const ANSI_BG = /\x1b\[47m/; // white-background cell — wide (colour) mode
+
+test('renderQR: defaults to scannable Unicode-block (small) mode', () => {
+  // Regression: the wide colour mode (small=false) renders invisibly on
+  // light terminals and wraps past 80 columns. An unset qrSmall must NOT
+  // select it.
+  const out = captureRender({});
+  assert.ok(BLOCK_GLYPHS.test(out), 'default render must use Unicode block glyphs');
+  assert.ok(!ANSI_BG.test(out), 'default render must not use ANSI background-colour cells');
+});
+
+test('renderQR: small mode fits within 80 columns (no wrap)', () => {
+  const out = captureRender({});
+  const widest = Math.max(
+    ...out
+      .split('\n')
+      .map((l) => [...l.replace(/\x1b\[[0-9;]*m/g, '')].length)
+  );
+  assert.ok(widest <= 80, `QR must fit an 80-col terminal, got ${widest} cols`);
+});
+
+test('renderQR: explicit small=false still opts into the wide colour mode', () => {
+  // The wide mode remains available for operators who want it.
+  const out = captureRender({ small: false });
+  assert.ok(ANSI_BG.test(out), 'small=false must render the ANSI colour QR');
+  assert.ok(!BLOCK_GLYPHS.test(out), 'small=false must not use block glyphs');
+});
 
 // A temp session path so the test never writes into /opt.
 function makeConfig() {
