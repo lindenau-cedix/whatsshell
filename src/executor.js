@@ -167,10 +167,25 @@ function truncate(str, maxChars) {
 }
 
 /**
- * Format the executor result for sending back to the user via WhatsApp.
- * Keeps the message compact and indicates failure clearly.
+ * Format the executor result for sending back to the user.
+ *
+ * The default output is markdown-friendly (backticks, emoji status line) and
+ * is consumed by WhatsApp and SMS. When `opts.channel === 'voice'` we switch
+ * to a TTS-friendly form: no markdown fences (TTS reads them aloud), German
+ * status words instead of emoji, and a hard cap well under Twilio's 4000-
+ * char `<Say>` limit regardless of the per-channel maxOutputChars setting.
+ *
+ * Keeping the legacy single-arg call working means existing call sites
+ * (router.handleMessage, executor tests) need no change.
  */
-function formatResult(result) {
+function formatResult(result, opts = {}) {
+  if (opts && opts.channel === 'voice') {
+    return formatResultForTTS(result, opts);
+  }
+  return formatResultDefault(result);
+}
+
+function formatResultDefault(result) {
   const parts = [];
   if (result.timedOut) {
     parts.push(`⏱ Timeout nach ${Math.round(result.durationMs / 1000)}s.`);
@@ -186,6 +201,46 @@ function formatResult(result) {
     parts.push('stderr:\n```\n' + result.stderr.trim() + '\n```');
   }
   return parts.join('\n');
+}
+
+/**
+ * TTS-friendly variant. Strips markdown fences, replaces emoji with German
+ * status words, and concatenates stdout/stderr as plain prose. A hard cap of
+ * 3500 chars sits well under Twilio's 4000-char `<Say>` limit and keeps the
+ * spoken reply short enough for a phone call.
+ *
+ * Decision: we collapse multi-line stdout into single spaces. TTS pauses at
+ * every line break (a `<break>` in SSML terms), which sounds unnatural when
+ * reading command output like `df -h`. Joining with a space reads like a
+ * sentence.
+ */
+const VOICE_HARD_CAP = 3500;
+
+function formatResultForTTS(result, opts) {
+  const maxChars = (opts && typeof opts.maxOutputChars === 'number')
+    ? Math.min(opts.maxOutputChars, VOICE_HARD_CAP)
+    : VOICE_HARD_CAP;
+
+  let statusLine;
+  if (result.timedOut) {
+    statusLine = 'Zeitüberschreitung.';
+  } else if (result.exitCode !== 0) {
+    statusLine = `Fehler, Exit-Code ${result.exitCode}.`;
+  } else {
+    statusLine = 'OK.';
+  }
+
+  const parts = [statusLine];
+  if (result.stdout && result.stdout.trim().length > 0) {
+    parts.push(result.stdout.trim().replace(/\s+/g, ' '));
+  }
+  if (result.stderr && result.stderr.trim().length > 0) {
+    parts.push('Fehlermeldung: ' + result.stderr.trim().replace(/\s+/g, ' '));
+  }
+
+  const joined = parts.join(' ');
+  if (joined.length <= maxChars) return joined;
+  return joined.slice(0, maxChars) + ' (Ausgabe gekürzt)';
 }
 
 module.exports = {

@@ -151,6 +151,17 @@ Restart nicht nötig.**
 | `sms.validateSignature`             | boolean       | `true`           | Twilio-Signaturprüfung aktiv (Pflicht in Produktion) |
 | `sms.maxOutputChars`                | number        | `1600`           | SMS-Output-Limit (Twilio segmentiert >160 Zeichen) |
 | `sms.rateLimitPerMinute`            | number        | `30`             | Rate-Limit pro Quell-IP |
+| `voice.enabled`                     | boolean       | `false`          | Voice-Kanal aktivieren (Twilio Programmable Voice) |
+| `voice.twilioAccountSid`            | string        | —                | Twilio Account SID — kann mit `sms.twilioAccountSid` identisch sein |
+| `voice.twilioAuthToken`             | string        | —                | Twilio Auth Token (geheim!) — kann mit `sms.twilioAuthToken` identisch sein |
+| `voice.twilioPhoneNumber`           | string        | —                | **Eigene** Twilio-Rufnummer für Voice (mit Voice-Capability) |
+| `voice.webhookPath`                 | string        | `/voice/inbound` | Lokaler Express-Pfad für den Voice-Webhook |
+| `voice.httpPort`                    | number        | `3001`           | Lokaler HTTP-Port (separat von SMS-Port) |
+| `voice.httpHost`                    | string        | `127.0.0.1`      | Niemals auf `0.0.0.0` setzen! |
+| `voice.validateSignature`           | boolean       | `true`           | Twilio-Signaturprüfung aktiv (Pflicht in Produktion) |
+| `voice.maxOutputChars`              | number        | `500`            | TTS-Output-Limit (Twilio `<Say>` limitiert bei 4000) |
+| `voice.rateLimitPerMinute`          | number        | `30`             | Rate-Limit pro Quell-IP |
+| `voice.command`                     | string        | —                | **Eine** Whitelist-Befehls-Zeile, die bei jedem Anruf läuft. Muss identisch mit einem `whitelist.commands[*].command` sein — sonst startet der Service nicht. |
 | `whitelist.numbers`                 | string-array  | `[]`             | Telefonnummern in E.164 **ohne** `+` |
 | `whitelist.commands`                | object-array  | `[]`             | Vorab freigegebene Kommandos |
 | `security.timeoutMs`                | number        | `30000`          | Max. Laufzeit pro Kommando |
@@ -379,6 +390,164 @@ HTTP-Server startet dann nicht mehr, WhatsApp funktioniert unverändert.
 
 ---
 
+## Voice via Twilio
+
+Ein Anruf auf der konfigurierten Twilio-Rufnummer führt **einen einzigen
+vorab festgelegten Befehl** aus und liest das Ergebnis per TTS vor.
+„Voice-Mode" ist damit eine Art Status-Hotline: anrufen, kurz warten,
+Uptime / Docker-Status / etc. hören, auflegen.
+
+Die Whitelist ist dieselbe wie für WhatsApp und SMS. SMS- und
+Voice-Kanal können gleichzeitig aktiv sein — der Voice-Webhook läuft auf
+einem **separaten HTTP-Port** (`voice.httpPort`, Default `3001`), damit
+beide Reverse-Proxy-Pfade unabhängig bleiben.
+
+### Schritt 1 — Twilio-Nummer mit Voice-Capability kaufen
+
+1. Auf <https://www.twilio.com/try-twilio> registrieren (falls noch nicht
+   geschehen).
+2. **Phone Numbers → Manage → Buy a number** — eine DE-Nummer wählen, die
+   **Voice-Fähigkeit** hat (steht im Listing als „Voice" angekreuzt).
+   Reine SMS-Nummern funktionieren für Voice nicht.
+3. Account SID und Auth Token notieren (gleiche wie für SMS sind OK —
+   Account-Credentials sind nicht number-spezifisch).
+
+### Schritt 2 — Voice-Befehl in `config.json` definieren
+
+`voice.command` ist der exakte Befehls-String, der bei jedem Anruf
+ausgeführt wird — und **muss** identisch mit einem Eintrag in
+`whitelist.commands` sein, sonst verweigert der Service den Start
+(fail-closed).
+
+```json
+{
+  "voice": {
+    "enabled": true,
+    "twilioAccountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilioAuthToken": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilioPhoneNumber": "+499876543210",
+    "webhookPath": "/voice/inbound",
+    "httpPort": 3001,
+    "httpHost": "127.0.0.1",
+    "validateSignature": true,
+    "maxOutputChars": 500,
+    "command": "uptime"
+  },
+  "whitelist": {
+    "commands": [
+      { "name": "uptime", "command": "uptime", "description": "Server-Uptime" }
+    ]
+  }
+}
+```
+
+> ⚠️ `voice.command` muss exakt mit `whitelist.commands[*].command`
+> übereinstimmen — inklusive Groß-/Kleinschreibung und Argumente. Bei
+> einem Tippfehler startet der Service nicht und das Log enthält
+> `voice.command "..." ist nicht in whitelist.commands`.
+
+### Schritt 3 — Inbound-Voice-Webhook konfigurieren
+
+In der Twilio-Konsole: **Phone Numbers → Active Numbers → Deine Voice-
+Nummer → Configuration**:
+
+- **„A CALL COMES IN"** → **Webhook** → `https://<deine-domain>/voice/inbound`
+- HTTP-Methode: **POST**
+- Speichern.
+
+> ⚠️ **Nicht „A MESSAGE COMES IN"** verwechseln — das ist der SMS-Webhook.
+> Die Voice-Nummer braucht zwingend einen separaten Eintrag unter
+> „A CALL COMES IN", sonst erreicht dich kein Anruf.
+
+### Schritt 4 — Reverse-Proxy um Voice-Route erweitern
+
+Der Reverse-Proxy muss `/voice/inbound` an Port `3001` weiterleiten.
+Beispiel für **Caddy**:
+
+```
+bot.example.com {
+    reverse_proxy /sms/inbound 127.0.0.1:3000 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host  {host}
+    }
+    reverse_proxy /voice/inbound 127.0.0.1:3001 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host  {host}
+    }
+}
+```
+
+Für **nginx** einen zweiten `location`-Block für `/voice/inbound`
+hinzufügen, der analog zu `/sms/inbound` auf `127.0.0.1:3001` proxied.
+Cloudflare-Tunnel: zweite `ingress`-Regel mit `service: http://127.0.0.1:3001`.
+
+> ⚠️ **Beide Routen brauchen `X-Forwarded-*`-Header**, sonst schlägt die
+> Twilio-Signaturprüfung fehl — Twilio hasht die öffentliche URL, nicht
+> `http://127.0.0.1:3001/...`.
+
+### Schritt 5 — Testen
+
+```bash
+sudo systemctl restart whatsapp-shell-bot
+sudo journalctl -u whatsapp-shell-bot -f
+```
+
+Von einer **whitelisted Nummer** die Twilio-Voice-Nummer anrufen. Du
+hörst „Bitte warten." und dann das TTS-Ergebnis (z.B. „OK. 14 Uhr 32,
+up 5 Tage …"). Im Log:
+
+```
+info: voice_reply_sent  callSid=CAxxxx length=68
+```
+
+Anruf von einer **nicht-whitelisted Nummer** → Anruf wird sofort mit
+„Bitte warten." beendet, kein Befehl läuft, kein TTS-Output. Im Log
+taucht `unknown_number` auf.
+
+### Wie es funktioniert (Architektur)
+
+1. Twilio sendet `POST /voice/inbound` mit `CallSid`, `From`, …
+2. Der Service prüft die Twilio-Signatur gegen die öffentliche URL
+   (rekonstruiert aus `X-Forwarded-*`).
+3. Service antwortet **sofort** mit `<Response><Say>Bitte warten.</Say>
+   </Response>`. Die leere Variante `<Response/>` würde den Anruf sofort
+   beenden — der TwiML-Ack hält den Anruf offen.
+4. Parallel läuft der konfigurierte Befehl via `child_process.execFile`
+   (keine Shell, wie überall sonst).
+5. Wenn der Befehl fertig ist, ruft der Service
+   `client.calls(callSid).update({twiml: '<Response><Say>...</Say></Response>'})`
+   auf. Twilio spricht die TwiML **mid-call** — der Anrufer wartet
+   typischerweise 1–3 Sekunden, dann kommt das Ergebnis.
+
+### Kosten-Hinweis
+
+Twilio berechnet die Anrufdauer pro angefangener Minute (DE-Nummer
+typischerweise ~0,01–0,02 €/Minute). Ein typischer Status-Anruf dauert
+20–60 Sekunden (TTS liest ca. 12 Zeichen/Sekunde). Bei vielen Anrufen
+am Tag lohnt sich ein Blick auf die Twilio-Abrechnung.
+
+### Deaktivierung
+
+`"voice": { "enabled": false }` setzen und `systemctl restart`. Der
+Voice-HTTP-Server startet dann nicht mehr, WhatsApp und SMS laufen
+unverändert.
+
+### Voice-spezifische Gotchas
+
+- **Leeres `<Response/>` beendet den Anruf sofort.** Die
+  `voice`-Channel-Implementierung antwortet immer mit einem `<Say>`-
+  TwiML, damit der Anruf während der Befehlsausführung offen bleibt.
+- **`voice.command` muss zur Whitelist passen.** Service startet sonst
+  nicht (fail-closed).
+- **Hot-Reload der Whitelist funktioniert, aber `voice.command`,
+  `voice.httpPort`, `voice.webhookPath`, `voice.twilioPhoneNumber`
+  erfordern einen `systemctl restart`** — genau wie beim SMS-Kanal.
+- **Anrufer legt auf vor Befehlsende:** Der `client.calls(callSid).update`
+  schlägt mit Twilio-Code `13231` (call ended) oder `20404` (CallSid
+  gone) fehl. Das wird als Warnung geloggt, nicht als Fehler.
+
+---
+
 ---
 
 ## Update-Prozess
@@ -588,6 +757,25 @@ Häufigste Ursache: `twilioAccountSid` / `twilioAuthToken` /
 bewusst **closed** — wenn SMS explizit angefordert wurde und nicht
 booten kann, startet der ganze Service nicht (sonst hätte der Admin
 stillschweigend nur noch WhatsApp).
+
+### Voice: Anruf wird sofort aufgelegt / kein TTS
+
+1. **Twilio-Konsole prüfen:** ist „A CALL COMES IN" auf die richtige
+   `/voice/inbound`-URL gesetzt? Steht die Nummer auf **Voice-fähig**?
+2. **Reverse-Proxy** muss `/voice/inbound` an `127.0.0.1:3001` (oder den
+   konfigurierten `voice.httpPort`) weiterleiten. Caddy / nginx-Snippets
+   siehe „Voice via Twilio" oben.
+3. **Signaturprüfung** schlägt fehl → Log enthält `voice_signature_invalid`.
+   Ursachen sind identisch zum SMS-Problem: `X-Forwarded-*`-Header
+   fehlen, oder der Body wird vom Reverse-Proxy verändert.
+4. **Service startet nicht** mit `voice.enabled=true` und
+   `voice.command: "xyz"`: prüfen, ob `"xyz"` exakt in
+   `whitelist.commands` steht. Fail-closed: der Service bootet nicht
+   bei Tippfehlern.
+5. **TTS kommt nicht an:** wenn der Anrufer auflegt, bevor der Befehl
+   fertig ist, ist das normal (siehe `voice_reply_sent` fehlt im Log).
+   Für längere Befehle `security.timeoutMs` niedriger setzen oder
+   `voice.command` durch einen schnelleren Befehl ersetzen.
 
 ---
 

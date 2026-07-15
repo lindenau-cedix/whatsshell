@@ -34,6 +34,7 @@ const { assertTTY, buildClient, wireAuthEvents } = require('./auth');
 const { createRouter } = require('./router');
 const { createWhatsAppChannel } = require('./channels/whatsapp');
 const { createSmsChannel } = require('./channels/sms');
+const { createVoiceChannel } = require('./channels/voice');
 const {
   installSignalHandlers,
   requestShutdown,
@@ -171,6 +172,27 @@ function loadConfig() {
     }
   } else {
     logger.info('SMS-Kanal deaktiviert (sms.enabled=false).');
+  }
+
+  // 7b. Voice channel — opt-in via voice.enabled. Mirrors SMS: fail-closed
+  //     on boot error so the admin never silently ends up voice-less while
+  //     thinking voice is on.
+  let voiceChannel = null;
+  if (cfg.voice && cfg.voice.enabled === true) {
+    try {
+      voiceChannel = createVoiceChannel(cfg, router);
+      await voiceChannel.start();
+      registerCleanup(async () => {
+        if (voiceChannel && voiceChannel.isListening()) {
+          await voiceChannel.stop();
+        }
+      });
+    } catch (err) {
+      logger.error(`Voice-Kanal konnte nicht starten: ${err.message}`);
+      process.exit(1);
+    }
+  } else {
+    logger.info('Voice-Kanal deaktiviert (voice.enabled=false).');
   }
 
   // 8. fs.watch on config.json — hot reload whitelist only.

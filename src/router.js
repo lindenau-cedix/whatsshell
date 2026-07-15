@@ -112,10 +112,15 @@ function createRouter(initialCfg) {
       ...metadata,
     });
 
-    // SMS needs a tighter output cap than WhatsApp (1600 vs 4000 chars).
-    const maxOutputChars = channel === 'sms' && cfg.sms && cfg.sms.maxOutputChars
-      ? cfg.sms.maxOutputChars
-      : cfg.security.maxOutputChars;
+    // Per-channel output cap. SMS (1600) and Voice (500 default) are tighter
+    // than the WhatsApp default (4000) because the reply transports are
+    // cost-bounded per message / per <Say>.
+    let maxOutputChars = cfg.security.maxOutputChars;
+    if (channel === 'sms' && cfg.sms && cfg.sms.maxOutputChars) {
+      maxOutputChars = cfg.sms.maxOutputChars;
+    } else if (channel === 'voice' && cfg.voice && cfg.voice.maxOutputChars) {
+      maxOutputChars = cfg.voice.maxOutputChars;
+    }
 
     const result = await executeCommand(cmdEntry.command, {
       timeoutMs: cfg.security.timeoutMs,
@@ -136,8 +141,9 @@ function createRouter(initialCfg) {
       ...metadata,
     });
 
-    // 5. Reply via the channel-specific transport.
-    const replyText = formatResult(result);
+    // 5. Reply via the channel-specific transport. Pass channel so the
+    //    executor can pick a TTS-friendly formatter for voice.
+    const replyText = formatResult(result, { channel });
     try {
       await replyFn(replyText);
     } catch (err) {

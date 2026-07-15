@@ -17,6 +17,19 @@
     "maxOutputChars": 1600,
     "rateLimitPerMinute": 30
   },
+  "voice": {
+    "enabled": false,
+    "twilioAccountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilioAuthToken": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilioPhoneNumber": "+491234567890",
+    "webhookPath": "/voice/inbound",
+    "httpPort": 3001,
+    "httpHost": "127.0.0.1",
+    "validateSignature": true,
+    "maxOutputChars": 500,
+    "rateLimitPerMinute": 30,
+    "command": "uptime"
+  },
   "whitelist": {
     "numbers": ["491701234567"],
     "commands": [
