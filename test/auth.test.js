@@ -101,3 +101,29 @@ test('buildClient: does not pin userDataDir (LocalAuth owns that later)', () => 
   // computed session dir, so buildClient must leave it unset at construction.
   assert.strictEqual(client.options.puppeteer.userDataDir, undefined);
 });
+
+test('buildClient: falls back to /usr/bin/chromium when env var unset', () => {
+  // puppeteer-core has no bundled browser; an undefined executablePath would
+  // make it hunt ~/.cache/puppeteer and throw "Could not find Chrome".
+  const saved = process.env.PUPPETEER_EXECUTABLE_PATH;
+  delete process.env.PUPPETEER_EXECUTABLE_PATH;
+  try {
+    const client = buildClient(makeConfig());
+    assert.strictEqual(client.options.puppeteer.executablePath, '/usr/bin/chromium');
+  } finally {
+    if (saved === undefined) delete process.env.PUPPETEER_EXECUTABLE_PATH;
+    else process.env.PUPPETEER_EXECUTABLE_PATH = saved;
+  }
+});
+
+test('buildClient: honours PUPPETEER_EXECUTABLE_PATH when set', () => {
+  const saved = process.env.PUPPETEER_EXECUTABLE_PATH;
+  process.env.PUPPETEER_EXECUTABLE_PATH = '/opt/custom/chrome';
+  try {
+    const client = buildClient(makeConfig());
+    assert.strictEqual(client.options.puppeteer.executablePath, '/opt/custom/chrome');
+  } finally {
+    if (saved === undefined) delete process.env.PUPPETEER_EXECUTABLE_PATH;
+    else process.env.PUPPETEER_EXECUTABLE_PATH = saved;
+  }
+});

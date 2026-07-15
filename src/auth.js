@@ -35,6 +35,15 @@ const ANSI_BOLD_YELLOW = '\x1b[1;33m';
 const ANSI_BOLD_CYAN = '\x1b[1;36m';
 
 /**
+ * Default path to the system Chromium installed by scripts/install.sh (apt
+ * `chromium` on Debian/Ubuntu). This is the SAME path the systemd unit hard-
+ * codes via PUPPETEER_EXECUTABLE_PATH. We keep it in sync here so the
+ * foreground QR-pairing command — which does not go through systemd and thus
+ * has no PUPPETEER_EXECUTABLE_PATH — still finds the browser.
+ */
+const DEFAULT_CHROMIUM_PATH = '/usr/bin/chromium';
+
+/**
  * Pre-flight check: do we have a terminal to draw the QR into?
  * If not, abort with a precise instruction for the operator.
  */
@@ -125,10 +134,16 @@ function buildClient(cfg) {
     }),
     puppeteer: {
       headless: true,
-      // We pass the path to the system Chromium that the install script
-      // installs via apt. If you want to use a different one, set
-      // PUPPETEER_EXECUTABLE_PATH in the environment.
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      // Decision: default to the system Chromium (DEFAULT_CHROMIUM_PATH),
+      // not undefined. `whatsapp-web.js` pulls in `puppeteer` but this project
+      // never runs `puppeteer browsers install`, so there is NO bundled
+      // browser to fall back on. If executablePath is left undefined, puppeteer
+      // hunts its download cache (~/.cache/puppeteer) and dies with
+      // "Could not find Chrome (ver. …)". The systemd unit passes
+      // PUPPETEER_EXECUTABLE_PATH, but the foreground QR-pairing command does
+      // not — so we hardcode the same apt path here as the safety net.
+      // Override via PUPPETEER_EXECUTABLE_PATH for a non-standard install.
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || DEFAULT_CHROMIUM_PATH,
       // Inherit the parent environment but override HOME so crashpad has a
       // writable database directory. Browser child only — see above.
       env: {
