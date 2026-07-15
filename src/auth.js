@@ -19,6 +19,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const qrcodeTerminal = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
@@ -89,6 +90,35 @@ function buildClient(cfg) {
     fs.mkdirSync(sessionPath, { recursive: true, mode: 0o750 });
   }
 
+  // Decision: give Chromium its OWN writable HOME, separate from the wabot
+  // account's home.
+  //
+  // The service account's home is /opt/whatsapp-shell-bot, owned root:wabot
+  // 0640/0750 so the running process cannot mutate its own config (see the
+  // config-ownership decision in CLAUDE.md). But Chromium's crashpad handler
+  // derives its crash-database directory from $HOME and CHECK-aborts on boot
+  // if it cannot create it — the failure surfaces as
+  //   "Failed to launch the browser process: ... Code: null"
+  //   "chrome_crashpad_handler: --database is required"
+  // and Chromium dies with SIGTRAP before whatsapp-web.js ever attaches.
+  // Passing --crash-dumps-dir does NOT override this on the packaged build;
+  // only a writable $HOME does.
+  //
+  // We therefore point the browser child at a uid-scoped dir under the
+  // system temp dir. It holds only the crashpad DB and throwaway caches —
+  // the real WhatsApp session lives in userDataDir (= sessionPath, pinned by
+  // LocalAuth), so this HOME is safe to treat as ephemeral. We deliberately
+  // do NOT nest it inside sessionPath: index.js decides "already paired?" by
+  // checking whether sessionPath is non-empty, and a browser home there would
+  // trip that heuristic and skip first-run QR pairing.
+  //
+  // The env override applies to the browser child ONLY — puppeteer's `env`
+  // launch option replaces the child's environment without touching this
+  // process's environment, so executor.js's execFile children (which inherit
+  // the unchanged process.env) and every whitelisted command are unaffected.
+  const chromeHome = path.join(os.tmpdir(), `wabot-chromium-home-${process.getuid()}`);
+  fs.mkdirSync(chromeHome, { recursive: true, mode: 0o700 });
+
   const client = new Client({
     authStrategy: new LocalAuth({
       dataPath: sessionPath,
@@ -99,6 +129,12 @@ function buildClient(cfg) {
       // installs via apt. If you want to use a different one, set
       // PUPPETEER_EXECUTABLE_PATH in the environment.
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      // Inherit the parent environment but override HOME so crashpad has a
+      // writable database directory. Browser child only — see above.
+      env: {
+        ...process.env,
+        HOME: chromeHome,
+      },
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
