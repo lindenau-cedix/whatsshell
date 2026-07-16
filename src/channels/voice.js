@@ -138,6 +138,14 @@ function createVoiceApp(cfg, router, twilioClient) {
 
   const app = express();
 
+  // Decision: trust the loopback proxy hop. The server binds to 127.0.0.1 and
+  // the mandatory reverse proxy (Caddy/nginx/Cloudflare Tunnel) always connects
+  // from loopback on the same host, adding X-Forwarded-For. Without this,
+  // express-rate-limit sees that header while Express distrusts all proxies and
+  // throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR — aborting the webhook so the
+  // result TwiML is never injected and the call drops after the ack.
+  app.set('trust proxy', 'loopback');
+
   app.use(
     webhookPath,
     express.urlencoded({ extended: false, limit: '64kb' })

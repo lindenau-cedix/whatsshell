@@ -549,6 +549,13 @@ verursachen.
   `client.calls(callSid).update` das Ergebnis einspielen kann.
 - **`voice.command` muss zur Whitelist passen.** Service startet sonst
   nicht (fail-closed).
+- **Call bricht direkt nach „Bitte warten." ab / `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`
+  im Log:** Der Reverse-Proxy setzt `X-Forwarded-For`, aber Express muss diesem
+  Loopback-Hop vertrauen, damit `express-rate-limit` die Client-IP ermitteln
+  kann. Der Kanal setzt dafür `app.set('trust proxy', 'loopback')` (der Server
+  lauscht auf `127.0.0.1`, der Proxy verbindet sich lokal). Betrifft SMS und
+  Voice gleichermaßen. Kein Handeln nötig, außer der Fehler taucht nach eigenen
+  Änderungen wieder auf.
 - **Hot-Reload der Whitelist funktioniert, aber `voice.command`,
   `voice.httpPort`, `voice.webhookPath`, `voice.twilioPhoneNumber`
   erfordern einen `systemctl restart`** — genau wie beim SMS-Kanal.

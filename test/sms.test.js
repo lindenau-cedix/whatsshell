@@ -212,6 +212,50 @@ test('sms: accepts signed webhook and forwards to router', async (t) => {
   assert.strictEqual(ctx.captured.calls[0].metadata.messageSid, 'SMtest1');
 });
 
+test('sms: app trusts the loopback proxy hop (req.ip from X-Forwarded-For)', () => {
+  // Version-independent guard for the trust-proxy fix. Behind the mandatory
+  // loopback reverse proxy, Express must derive req.ip from X-Forwarded-For
+  // so express-rate-limit's keyGenerator never hits
+  // ERR_ERL_UNEXPECTED_X_FORWARDED_FOR (which, on some versions, 500s the webhook).
+  const cfg = JSON.parse(JSON.stringify(BASE_CFG));
+  const { app } = createSmsApp(cfg, { handleMessage: async () => {} });
+  assert.strictEqual(app.get('trust proxy'), 'loopback');
+});
+
+test('sms: X-Forwarded-For from the reverse proxy does not crash the limiter', async (t) => {
+  // Regression: behind Caddy/nginx/cloudflared every request carries an
+  // X-Forwarded-For header. Without app.set('trust proxy', 'loopback'),
+  // express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR and the
+  // webhook 500s instead of acking Twilio.
+  const ctx = await bootTestServer();
+  t.after(() => ctx.close());
+
+  const params = {
+    From: '+491701234567',
+    Body: 'uptime',
+    MessageSid: 'SMforwarded',
+  };
+  const signature = makeSignedRequest(
+    BASE_CFG.sms.twilioAuthToken,
+    ctx.publicUrl,
+    params
+  );
+
+  const body = urlencodedBody(params);
+  const res = await postForm(
+    ctx.port,
+    '/sms/inbound',
+    {
+      'x-twilio-signature': signature,
+      'x-forwarded-for': '13.37.4.5, 127.0.0.1',
+    },
+    body
+  );
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(ctx.captured.calls.length, 1);
+});
+
 test('sms: signature uses X-Forwarded-* headers (public URL)', async (t) => {
   // Sign against the public URL the reverse proxy presents, but POST to
   // the localhost listener. The channel must reconstruct the public URL

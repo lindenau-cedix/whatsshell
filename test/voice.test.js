@@ -534,6 +534,56 @@ test('voice: signature uses X-Forwarded-* headers (public URL)', async (t) => {
   assert.strictEqual(ctx.captured.calls.length, 1);
 });
 
+test('voice: app trusts the loopback proxy hop (req.ip from X-Forwarded-For)', () => {
+  // Version-independent guard for the trust-proxy fix. Behind the mandatory
+  // loopback reverse proxy, Express must derive req.ip from X-Forwarded-For
+  // so express-rate-limit's keyGenerator never hits
+  // ERR_ERL_UNEXPECTED_X_FORWARDED_FOR (which, on some versions, 500s the
+  // webhook and drops the call right after the "Bitte warten." ack).
+  const cfg = JSON.parse(JSON.stringify(BASE_CFG));
+  const { app } = createVoiceApp(cfg, { handleMessage: async () => {} }, {
+    calls: () => ({ update: async () => {} }),
+  });
+  assert.strictEqual(app.get('trust proxy'), 'loopback');
+});
+
+test('voice: X-Forwarded-For from the reverse proxy does not crash the limiter', async (t) => {
+  // Regression: behind Caddy/nginx/cloudflared every request carries an
+  // X-Forwarded-For header. Without app.set('trust proxy', 'loopback'),
+  // express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR, aborting
+  // the webhook so the result TwiML is never injected and the call drops
+  // right after the "Bitte warten." ack.
+  const ctx = await bootTestServer();
+  t.after(() => ctx.close());
+
+  const params = {
+    From: '+491701234567',
+    CallSid: 'CAforwarded',
+    CallStatus: 'in-progress',
+  };
+  const signature = makeSignedRequest(
+    BASE_CFG.voice.twilioAuthToken,
+    ctx.publicUrl,
+    params
+  );
+
+  const body = urlencodedBody(params);
+  const res = await postForm(
+    ctx.port,
+    '/voice/inbound',
+    {
+      'x-twilio-signature': signature,
+      'x-forwarded-for': '13.37.4.5, 127.0.0.1',
+    },
+    body
+  );
+
+  // The webhook completes normally and the command result is injected.
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(ctx.captured.calls.length, 1);
+  assert.strictEqual(ctx.captured.callsUpdates.length, 1);
+});
+
 test('voice: unknown caller gets a short ack and is never held on the line', async (t) => {
   const ctx = await bootTestServer();
   t.after(() => ctx.close());

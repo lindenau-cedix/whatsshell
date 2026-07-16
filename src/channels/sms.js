@@ -89,6 +89,13 @@ function createSmsApp(cfg, router) {
 
   const app = express();
 
+  // Decision: trust the loopback proxy hop. The server binds to 127.0.0.1 and
+  // the mandatory reverse proxy (Caddy/nginx/Cloudflare Tunnel) always connects
+  // from loopback on the same host, adding X-Forwarded-For. Without this,
+  // express-rate-limit sees that header while Express distrusts all proxies and
+  // throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every request.
+  app.set('trust proxy', 'loopback');
+
   // Webhook bodies are urlencoded. We do NOT use express.json() — Twilio
   // never sends JSON to webhooks, and a permissive JSON parser just
   // widens the attack surface for no reason.
