@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `whatsapp-shell-bot` is a Node.js 20 / systemd service that lets a small whitelist of phone numbers execute a small whitelist of shell commands on the host. Two channels: **WhatsApp** (via `whatsapp-web.js` + headless Chromium) and **SMS** (via Twilio Programmable Messaging, gated behind a local Express + reverse-proxy-with-HTTPS setup). Daily-rotating JSON audit logs. Runs as a dedicated `wabot` user with a hardened systemd unit. See `README.md` for operator-facing documentation (install, QR pairing, Twilio setup, reverse-proxy configs, troubleshooting).
 
+## Letzter Durchlauf
+
+**2026-07-16 — README.md ins Englische übersetzt**
+Aufgabe: Vollständige Übersetzung der deutschsprachigen `README.md` (Operator-Doku: Installation, QR-Scan, Konfiguration, Whitelist-Verwaltung, SMS via Twilio, Voice via Twilio, Update-Prozess, Sicherheitshinweise, Deinstallation, Troubleshooting) ins Englische. Inhaltsverzeichnis-Anker, Tabellen, Code-Blöcke und Twilio/Reverse-Proxy-Snippets wurden 1:1 übernommen, deutsche UI-Strings in Code/Logs/Beispielen jedoch belassen (z.B. `voice_signature_invalid`, `sms_reply_sent`, `[…gekürzt…]`-Marker, Twilio-Ansage „Bitte warten."). Der Voice-Abschnitt „Wie es funktioniert" und die Voice-spezifischen Gotchas wurden vollständig übersetzt inkl. Hinweis auf `app.set('trust proxy', 'loopback')`. Keine Code-Änderungen am Projekt selbst.
+
 ## Common commands
 
 ```bash

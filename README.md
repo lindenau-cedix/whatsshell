@@ -1,53 +1,54 @@
 # whatsapp-shell-bot
 
-Ein produktionsreifer WhatsApp-Bot als **systemd-Service** für **Ubuntu 22.04+ /
-Debian 12+**. Er erlaubt vorab freigegebenen Telefonnummern, vorab
-freigegebene Shell-Kommandos auf dem Server auszuführen — mit vollständigem
-Audit-Logging.
+A production-ready WhatsApp bot running as a **systemd service** on
+**Ubuntu 22.04+ / Debian 12+**. It allows pre-approved phone numbers to
+execute pre-approved shell commands on the server — with full audit
+logging.
 
-> ⚠️ **WhatsApp-ToS-Warnung**: Die Nutzung von unofficial Clients (wie
-> `whatsapp-web.js`) verstößt gegen die WhatsApp-Geschäftsbedingungen. Dein
-> Account kann temporär oder dauerhaft gesperrt werden. Dieses Tool ist nur
-> für private, nicht-kommerzielle Setups gedacht.
+> ⚠️ **WhatsApp ToS Warning**: Using unofficial clients (such as
+> `whatsapp-web.js`) violates WhatsApp's terms of service. Your account
+> may be temporarily or permanently banned. This tool is intended only
+> for private, non-commercial setups.
 
 ---
 
-## Inhaltsverzeichnis
+## Table of Contents
 
-- [Voraussetzungen](#voraussetzungen)
+- [Requirements](#requirements)
 - [Installation](#installation)
-- [Erstmalige Inbetriebnahme (QR-Scan)](#erstmalige-inbetriebnahme-qr-scan)
-- [Konfiguration](#konfiguration)
-- [Whitelist verwalten](#whitelist-verwalten)
+- [First-Time Setup (QR Scan)](#first-time-setup-qr-scan)
+- [Configuration](#configuration)
+- [Managing the Whitelist](#managing-the-whitelist)
 - [SMS via Twilio](#sms-via-twilio)
-- [Update-Prozess](#update-prozess)
-- [Sicherheitshinweise](#sicherheitshinweise)
-- [Deinstallation](#deinstallation)
+- [Voice via Twilio](#voice-via-twilio)
+- [Update Process](#update-process)
+- [Security Notes](#security-notes)
+- [Uninstallation](#uninstallation)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Voraussetzungen
+## Requirements
 
-- Ubuntu 22.04 LTS oder neuer, oder Debian 12 oder neuer
-- Root-Zugriff (für Installation)
-- Internetzugang (für WhatsApp-Web-Socket)
-- Ein zweites Endgerät mit WhatsApp (zum Scannen des QR-Codes)
+- Ubuntu 22.04 LTS or newer, or Debian 12 or newer
+- Root access (for installation)
+- Internet access (for the WhatsApp web socket)
+- A second device with WhatsApp (to scan the QR code)
 
-Ausgehende Verbindungen, die der Bot aufbaut:
+Outbound connections established by the bot:
 
-| Host                         | Zweck                |
-|------------------------------|----------------------|
-| `web.whatsapp.com`           | WebSocket-Endpoint   |
-| `mmg.whatsapp.com`           | Multimedia-Upload    |
-| `media.githubusercontent.com` | (nur bei updates)    |
-| `deb.nodesource.com`         | (nur bei Installation)|
+| Host                          | Purpose                |
+|-------------------------------|------------------------|
+| `web.whatsapp.com`            | WebSocket endpoint     |
+| `mmg.whatsapp.com`            | Multimedia upload      |
+| `media.githubusercontent.com` | (only for updates)     |
+| `deb.nodesource.com`          | (only for installation)|
 
 ---
 
 ## Installation
 
-### Option A — aus dem Git-Repo
+### Option A — from the git repository
 
 ```bash
 git clone <repo-url> /tmp/whatsshell
@@ -55,183 +56,182 @@ cd /tmp/whatsshell
 sudo bash scripts/install.sh
 ```
 
-### Option B — per curl-Pipe (falls als Einzel-Tarball verfügbar)
+### Option B — via curl-pipe (if available as a single tarball)
 
 ```bash
 curl -fsSL https://example.com/install.sh | sudo bash
 ```
 
-Das Install-Script:
+The install script:
 
-1. Installiert `apt`-Abhängigkeiten (Chromium für Puppeteer, System-Libs).
-2. Installiert Node.js 20 via NodeSource.
-3. Legt einen dedizierten System-User `wabot` an.
-4. Kopiert die App nach `/opt/whatsapp-shell-bot/`.
-5. Installiert npm-Dependencies mit `npm ci --omit=dev`.
-6. Generiert eine initiale `config.json` aus `config.example.json`.
-7. Installiert und aktiviert die systemd-Unit.
+1. Installs `apt` dependencies (Chromium for Puppeteer, system libs).
+2. Installs Node.js 20 via NodeSource.
+3. Creates a dedicated system user `wabot`.
+4. Copies the app to `/opt/whatsapp-shell-bot/`.
+5. Installs npm dependencies via `npm ci --omit=dev`.
+6. Generates an initial `config.json` from `config.example.json`.
+7. Installs and enables the systemd unit.
 
-> ⚠️ Der Service startet **nicht** automatisch. Du musst zuerst deine
-> Nummer(n) in der Whitelist eintragen und den Service dann manuell starten.
+> ⚠️ The service does **not** start automatically. You must first add
+> your number(s) to the whitelist and then start the service manually.
 
 ---
 
-## Erstmalige Inbetriebnahme (QR-Scan)
+## First-Time Setup (QR Scan)
 
-Der WhatsApp-Web-Client muss sich **einmalig** mit deinem WhatsApp-Account
-verbinden. Dazu zeigt der Bot einen QR-Code im Terminal an.
+The WhatsApp web client must connect to your WhatsApp account **once**.
+To do this, the bot displays a QR code in the terminal.
 
-### Schritt 1 — Service stoppen (falls versehentlich gestartet)
+### Step 1 — Stop the service (if started by accident)
 
 ```bash
 sudo systemctl stop whatsapp-shell-bot
 ```
 
-### Schritt 2 — Whitelist konfigurieren
+### Step 2 — Configure the whitelist
 
 ```bash
 sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh add-number 491701234567
-sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh add-command uptime "uptime" "Server-Uptime"
+sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh add-command uptime "uptime" "Server uptime"
 ```
 
-Oder direkt in `/opt/whatsapp-shell-bot/config.json` editieren — die Datei
-ist `root:wabot 0640`, also als root editierbar.
+Or edit `/opt/whatsapp-shell-bot/config.json` directly — the file is
+owned `root:wabot 0640`, so it's editable as root.
 
-### Schritt 3 — Im Vordergrund starten (für QR-Scan)
+### Step 3 — Start in foreground (for QR scan)
 
 ```bash
 sudo -u wabot /usr/bin/node /opt/whatsapp-shell-bot/src/index.js
 ```
 
-Im Terminal erscheint ein **großer QR-Code** (Unicode-Block-Zeichen).
-Öffne auf deinem Smartphone:
+A **large QR code** (Unicode block characters) will appear in the
+terminal. On your smartphone, open:
 
-> WhatsApp → Einstellungen → Verknüpfte Geräte → Gerät hinzufügen
+> WhatsApp → Settings → Linked Devices → Add Device
 
-Scanne den Code. Nach erfolgreichem Login zeigt das Terminal:
+Scan the code. After successful login, the terminal shows:
 
 ```
-✅ WhatsApp verbunden als <Dein Name> (<Deine Nummer>)
+✅ WhatsApp connected as <Your Name> (<Your Number>)
 ```
 
-### Schritt 4 — Vordergrund-Process beenden
+### Step 4 — End the foreground process
 
-Drücke `Ctrl+C`. Die Session-Credentials sind jetzt unter
-`/opt/whatsapp-shell-bot/.wwebjs_auth/` gespeichert.
+Press `Ctrl+C`. The session credentials are now stored in
+`/opt/whatsapp-shell-bot/.wwebjs_auth/`.
 
-### Schritt 5 — Service im Hintergrund starten
+### Step 5 — Start the service in the background
 
 ```bash
 sudo systemctl start whatsapp-shell-bot
 sudo systemctl status whatsapp-shell-bot
 ```
 
-Ab jetzt läuft der Bot dauerhaft. **Ein erneuter QR-Scan ist nach einem
-Restart nicht nötig.**
+From now on the bot runs permanently. **A new QR scan is not required
+after a restart.**
 
 ---
 
-## Konfiguration
+## Configuration
 
 `/opt/whatsapp-shell-bot/config.json`:
 
-| Pfad                                | Typ           | Default          | Bedeutung |
-|-------------------------------------|---------------|------------------|-----------|
-| `whatsapp.sessionPath`              | string        | `.wwebjs_auth`   | Pfad für persistierte WhatsApp-Credentials |
-| `whatsapp.qrRefreshSeconds`         | number        | `20`             | (ungenutzt, Refresh wird von whatsapp-web.js gesteuert) |
-| `whatsapp.qrTimeoutMinutes`         | number        | `30`             | Nach dieser Zeit wird der QR-Prozess abgebrochen |
-| `whatsapp.qrSmall`                  | boolean       | `true`           | `true` → kompakter QR aus Unicode-Blockzeichen (▀▄█), passt in 80 Spalten, überall sichtbar. `false` → breiter QR aus ANSI-Hintergrundfarben (~118 Spalten); bricht auf 80-Spalten-Terminals um und ist auf hellem Hintergrund unsichtbar. |
-| `sms.enabled`                       | boolean       | `false`          | SMS-Kanal aktivieren |
-| `sms.twilioAccountSid`              | string        | —                | Twilio Account SID (`AC…`) |
-| `sms.twilioAuthToken`               | string        | —                | Twilio Auth Token (geheim!) |
-| `sms.twilioPhoneNumber`             | string        | —                | Twilio-Rufnummer in E.164 mit `+` |
-| `sms.webhookPath`                   | string        | `/sms/inbound`   | Lokaler Express-Pfad für den Webhook |
-| `sms.httpPort`                      | number        | `3000`           | Lokaler HTTP-Port (lauscht auf 127.0.0.1) |
-| `sms.httpHost`                      | string        | `127.0.0.1`      | Niemals auf `0.0.0.0` setzen! |
-| `sms.validateSignature`             | boolean       | `true`           | Twilio-Signaturprüfung aktiv (Pflicht in Produktion) |
-| `sms.maxOutputChars`                | number        | `1600`           | SMS-Output-Limit (Twilio segmentiert >160 Zeichen) |
-| `sms.rateLimitPerMinute`            | number        | `30`             | Rate-Limit pro Quell-IP |
-| `voice.enabled`                     | boolean       | `false`          | Voice-Kanal aktivieren (Twilio Programmable Voice) |
-| `voice.twilioAccountSid`            | string        | —                | Twilio Account SID — kann mit `sms.twilioAccountSid` identisch sein |
-| `voice.twilioAuthToken`             | string        | —                | Twilio Auth Token (geheim!) — kann mit `sms.twilioAuthToken` identisch sein |
-| `voice.twilioPhoneNumber`           | string        | —                | **Eigene** Twilio-Rufnummer für Voice (mit Voice-Capability) |
-| `voice.webhookPath`                 | string        | `/voice/inbound` | Lokaler Express-Pfad für den Voice-Webhook |
-| `voice.httpPort`                    | number        | `3001`           | Lokaler HTTP-Port (separat von SMS-Port) |
-| `voice.httpHost`                    | string        | `127.0.0.1`      | Niemals auf `0.0.0.0` setzen! |
-| `voice.validateSignature`           | boolean       | `true`           | Twilio-Signaturprüfung aktiv (Pflicht in Produktion) |
-| `voice.maxOutputChars`              | number        | `500`            | TTS-Output-Limit (Twilio `<Say>` limitiert bei 4000) |
-| `voice.rateLimitPerMinute`          | number        | `30`             | Rate-Limit pro Quell-IP |
-| `voice.ackPauseSeconds`             | number        | `35`             | Stille Haltezeit nach „Bitte warten“, bis das Ergebnis per TwiML eingespielt wird (1–600 Sekunden) |
-| `voice.command`                     | string        | —                | **Eine** Whitelist-Befehls-Zeile, die bei jedem Anruf läuft. Muss identisch mit einem `whitelist.commands[*].command` sein — sonst startet der Service nicht. |
-| `whitelist.numbers`                 | string-array  | `[]`             | Telefonnummern in E.164 **ohne** `+` |
-| `whitelist.commands`                | object-array  | `[]`             | Vorab freigegebene Kommandos |
-| `security.timeoutMs`                | number        | `30000`          | Max. Laufzeit pro Kommando |
-| `security.maxOutputChars`           | number        | `4000`           | Output-Limit (WhatsApp) |
-| `security.allowedFromGroups`        | boolean       | `false`          | (ungenutzt — Gruppen sind immer deaktiviert) |
-| `logging.directory`                 | string        | `/var/log/...`   | Pfad für rotierte Audit-Logs |
-| `logging.retentionDays`             | number        | `14`             | Aufbewahrungsdauer in Tagen |
+| Path                          | Type           | Default          | Description |
+|-------------------------------|----------------|------------------|-------------|
+| `whatsapp.sessionPath`        | string         | `.wwebjs_auth`   | Path for persisted WhatsApp credentials |
+| `whatsapp.qrRefreshSeconds`   | number         | `20`             | (unused, refresh is controlled by whatsapp-web.js) |
+| `whatsapp.qrTimeoutMinutes`   | number         | `30`             | The QR process is aborted after this time |
+| `whatsapp.qrSmall`            | boolean        | `true`           | `true` → compact QR using Unicode block characters (▀▄█), fits in 80 columns, visible everywhere. `false` → wider QR using ANSI background colors (~118 columns); wraps on 80-column terminals and is invisible on light backgrounds. |
+| `sms.enabled`                 | boolean        | `false`          | Enable SMS channel |
+| `sms.twilioAccountSid`        | string         | —                | Twilio Account SID (`AC…`) |
+| `sms.twilioAuthToken`         | string         | —                | Twilio Auth Token (secret!) |
+| `sms.twilioPhoneNumber`       | string         | —                | Twilio phone number in E.164 with `+` |
+| `sms.webhookPath`             | string         | `/sms/inbound`   | Local Express path for the webhook |
+| `sms.httpPort`                | number         | `3000`           | Local HTTP port (listens on 127.0.0.1) |
+| `sms.httpHost`                | string         | `127.0.0.1`      | Never set to `0.0.0.0`! |
+| `sms.validateSignature`       | boolean        | `true`           | Twilio signature check active (required in production) |
+| `sms.maxOutputChars`          | number         | `1600`           | SMS output limit (Twilio segments at >160 chars) |
+| `sms.rateLimitPerMinute`      | number         | `30`             | Rate limit per source IP |
+| `voice.enabled`               | boolean        | `false`          | Enable voice channel (Twilio Programmable Voice) |
+| `voice.twilioAccountSid`      | string         | —                | Twilio Account SID — can be identical to `sms.twilioAccountSid` |
+| `voice.twilioAuthToken`       | string         | —                | Twilio Auth Token (secret!) — can be identical to `sms.twilioAuthToken` |
+| `voice.twilioPhoneNumber`     | string         | —                | **Dedicated** Twilio phone number for Voice (with voice capability) |
+| `voice.webhookPath`           | string         | `/voice/inbound` | Local Express path for the voice webhook |
+| `voice.httpPort`              | number         | `3001`           | Local HTTP port (separate from the SMS port) |
+| `voice.httpHost`              | string         | `127.0.0.1`      | Never set to `0.0.0.0`! |
+| `voice.validateSignature`     | boolean        | `true`           | Twilio signature check active (required in production) |
+| `voice.maxOutputChars`        | number         | `500`            | TTS output limit (Twilio `<Say>` caps at 4000) |
+| `voice.rateLimitPerMinute`    | number         | `30`             | Rate limit per source IP |
+| `voice.ackPauseSeconds`       | number         | `35`             | Quiet hold time after "Please wait" before the result is injected via TwiML (1–600 seconds) |
+| `voice.command`               | string         | —                | **One** whitelist command line that runs on every call. Must be identical to a `whitelist.commands[*].command` — otherwise the service refuses to start. |
+| `whitelist.numbers`           | string-array   | `[]`             | Phone numbers in E.164 **without** `+` |
+| `whitelist.commands`          | object-array   | `[]`             | Pre-approved commands |
+| `security.timeoutMs`          | number         | `30000`          | Max execution time per command |
+| `security.maxOutputChars`     | number         | `4000`           | Output limit (WhatsApp) |
+| `security.allowedFromGroups`  | boolean        | `false`          | (unused — groups are always disabled) |
+| `logging.directory`           | string         | `/var/log/...`   | Path for rotated audit logs |
+| `logging.retentionDays`       | number         | `14`             | Retention period in days |
 
-> ℹ️ **Hot-Reload**: Änderungen an `config.json` werden vom laufenden
-> Service per `fs.watch` automatisch erkannt. **Kein Neustart nötig.**
+> ℹ️ **Hot reload**: Changes to `config.json` are detected automatically
+> by the running service via `fs.watch`. **No restart required.**
 
 ---
 
-## Whitelist verwalten
+## Managing the Whitelist
 
-Komfortabel über das Helper-Script:
+Conveniently via the helper script:
 
 ```bash
 sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh list
 sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh add-number 491701234567
-sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh add-command docker-ps "docker ps" "Laufende Container"
+sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh add-command docker-ps "docker ps" "Running containers"
 sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh remove-number 491701234567
 sudo /opt/whatsapp-shell-bot/scripts/update-whitelist.sh remove-command docker-ps
 ```
 
-Das Script validiert das JSON, legt ein Backup an und korrigiert
-Ownership/Permissions.
+The script validates the JSON, creates a backup, and fixes ownership
+and permissions.
 
-### Whitelist-Modell
+### Whitelist Model
 
-Die Whitelist ist **kanal-übergreifend**: eine Nummer, die in
-`whitelist.numbers` steht, kann denselben Befehl sowohl per WhatsApp als
-auch per SMS triggern. Wir halten das absichtlich einfach — eine Nummer
-identifiziert eine Person, der Kanal ist nur ein Transport.
+The whitelist is **channel-agnostic**: a number listed in
+`whitelist.numbers` can trigger the same command both via WhatsApp and
+via SMS. We intentionally keep it simple — a number identifies a
+person, the channel is just transport.
 
-> ℹ️ Wenn du **kanal-spezifische** Whitelists brauchst, trag dieselbe
-> Nummer einfach zweimal ein (z.B. `491701234567` für WhatsApp,
-> eine andere für SMS-only) und verwalte sie über
-> `add-number`/`remove-number`.
+> ℹ️ If you need **channel-specific** whitelists, simply add the same
+> number twice (e.g. `491701234567` for WhatsApp, a different one for
+> SMS-only) and manage them via `add-number`/`remove-number`.
 
 ---
 
 ## SMS via Twilio
 
-Der gleiche Bot akzeptiert SMS über **Twilio Programmable Messaging** und
-schickt die Antwort auf demselben Kanal zurück. Die Whitelist und das
-Audit-Logging sind geteilt — eine SMS von einer whitelisted Nummer löst
-denselben Befehl aus wie eine WhatsApp-Nachricht.
+The same bot accepts SMS via **Twilio Programmable Messaging** and
+sends the reply back through the same channel. The whitelist and audit
+logging are shared — an SMS from a whitelisted number triggers the
+same command as a WhatsApp message.
 
-### Schritt 1 — Twilio-Account einrichten
+### Step 1 — Set up a Twilio account
 
-1. Auf <https://www.twilio.com/try-twilio> registrieren.
-2. In der Twilio-Konsole: **Phone Numbers → Manage → Buy a number** —
-   eine DE-Nummer mit Voice- und **SMS-Fähigkeit** wählen.
-3. **Account SID** und **Auth Token** notieren (Konsolen-Dashboard).
-4. Optional für den Ersttest: **Twilio Sandbox** aktivieren. Sandbox-
-   Nummern haben US-Vorwahl (`+1…`) und sind kostenlos. Webhook-URL
+1. Register at <https://www.twilio.com/try-twilio>.
+2. In the Twilio console: **Phone Numbers → Manage → Buy a number** —
+   pick a DE number with voice and **SMS capability**.
+3. Note the **Account SID** and **Auth Token** (console dashboard).
+4. Optional for initial testing: enable the **Twilio Sandbox**. Sandbox
+   numbers have a US country code (`+1…`) and are free. Webhook URL
    format: `https://bot.example.com/sms/inbound`.
 
-### Schritt 2 — Webhook konfigurieren
+### Step 2 — Configure the webhook
 
-In der Twilio-Konsole: **Phone Numbers → Active Numbers → Deine Nummer →
+In the Twilio console: **Phone Numbers → Active Numbers → Your Number →
 Configuration**:
 
-- "A MESSAGE COMES IN" → **Webhook** → `https://<deine-domain>/sms/inbound`
-- HTTP-Methode: **POST**
-- Speichern.
+- "A MESSAGE COMES IN" → **Webhook** → `https://<your-domain>/sms/inbound`
+- HTTP method: **POST**
+- Save.
 
-### Schritt 3 — Credentials in `config.json` eintragen
+### Step 3 — Add credentials to `config.json`
 
 ```json
 {
@@ -248,16 +248,16 @@ Configuration**:
 }
 ```
 
-> ⚠️ **`httpHost` muss `127.0.0.1` bleiben.** Der Service lauscht nur
-> lokal. Twilio erreicht ihn **niemals direkt** — immer über den
-> Reverse-Proxy mit HTTPS.
+> ⚠️ **`httpHost` must remain `127.0.0.1`.** The service only listens
+> locally. Twilio **never** reaches it directly — always via the
+> reverse proxy with HTTPS.
 
-### Schritt 4 — Reverse-Proxy mit HTTPS einrichten
+### Step 4 — Set up a reverse proxy with HTTPS
 
-**Pflicht-Voraussetzung**, sonst funktioniert Twilio nicht (kein
-HTTPS = keine gültige Signatur). Drei empfohlene Optionen:
+**Mandatory requirement**, otherwise Twilio won't work (no HTTPS = no
+valid signature). Three recommended options:
 
-#### Option A — Caddy (einfachste Variante)
+#### Option A — Caddy (simplest)
 
 `/etc/caddy/Caddyfile`:
 
@@ -274,7 +274,7 @@ bot.example.com {
 sudo systemctl reload caddy
 ```
 
-Caddy besorgt das Let's-Encrypt-Zertifikat automatisch.
+Caddy obtains the Let's Encrypt certificate automatically.
 
 #### Option B — nginx + certbot
 
@@ -304,14 +304,14 @@ sudo certbot --nginx -d bot.example.com
 sudo systemctl reload nginx
 ```
 
-> ⚠️ **`proxy_pass_request_body on` ist kritisch.** Twilio signiert den
-> **Original-Body**. Wenn nginx ihn umschreibt oder wegfiltert, schlägt
-> die Signaturprüfung fehl.
+> ⚠️ **`proxy_pass_request_body on` is critical.** Twilio signs the
+> **original body**. If nginx rewrites or filters it away, signature
+> verification will fail.
 
-#### Option C — Cloudflare Tunnel (kein offener Port nötig)
+#### Option C — Cloudflare Tunnel (no open port required)
 
 ```bash
-# cloudflared installieren (siehe https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+# Install cloudflared (see https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 cloudflared tunnel create wabot
 cloudflared tunnel route dns wabot bot.example.com
 
@@ -331,17 +331,18 @@ EOF
 cloudflared tunnel run wabot
 ```
 
-Cloudflare terminiert HTTPS und setzt die X-Forwarded-Header automatisch.
+Cloudflare terminates HTTPS and sets the `X-Forwarded-*` headers
+automatically.
 
-### Schritt 5 — Testen
+### Step 5 — Test
 
 ```bash
 sudo systemctl restart whatsapp-shell-bot
 sudo journalctl -u whatsapp-shell-bot -f
 ```
 
-Von einer **whitelisted Nummer** eine SMS an die Twilio-Nummer schicken.
-Im Log solltest du sehen:
+Send an SMS from a **whitelisted number** to the Twilio number. In the
+log you should see:
 
 ```
 info: executed   channel=sms sender=491701234567 command=uptime
@@ -349,76 +350,74 @@ info: command_result channel=sms exitCode=0 durationMs=12
 info: sms_reply_sent to=491701234567 length=23
 ```
 
-### Sandbox-Modus
+### Sandbox Mode
 
-Für den Ersttest ohne echte DE-Nummer kannst du die **Twilio Sandbox**
-nutzen:
+For initial testing without a real DE number you can use the **Twilio
+Sandbox**:
 
-1. In der Konsole: **Messaging → Try it out → Twilio Sandbox**.
-2. Sandbox-Nummer ist `+1 415 523 8886` (US).
-3. Du musst von deinem Handy aus einmalig `join <keyword>` an die
-   Sandbox-Nummer schicken.
-4. Webhook-URL bleibt dieselbe; Twilio sendet die Sandbox-SMS an
-   deinen Bot.
+1. In the console: **Messaging → Try it out → Twilio Sandbox**.
+2. Sandbox number is `+1 415 523 8886` (US).
+3. From your phone, send `join <keyword>` to the sandbox number once.
+4. The webhook URL stays the same; Twilio forwards the sandbox SMS to
+   your bot.
 
-Sandbox-Nummern sind kostenlos und ideal zum Testen. Für den
-Produktivbetrieb brauchst du eine echte DE-Nummer.
+Sandbox numbers are free and ideal for testing. For production use
+you need a real DE number.
 
-### GDPR / DSGVO-Hinweis
+### GDPR / DSGVO Note
 
-**Jede eingehende SMS wird im Audit-Log unter
-`/var/log/whatsapp-shell-bot/whatsapp-shell-bot-*.log` gespeichert.**
-Das gilt auch für Nachrichten von nicht-whitelisted Nummern (diese
-werden mit `unknown_number` geloggt, aber **nicht** beantwortet).
+**Every incoming SMS is stored in the audit log under
+`/var/log/whatsapp-shell-bot/whatsapp-shell-bot-*.log`.** This also
+applies to messages from non-whitelisted numbers (these are logged
+with `unknown_number`, but **not** answered).
 
-Standard-Retention: **14 Tage**. Stelle sicher, dass das deinen
-Datenschutzpflichten genügt — bei strengeren Anforderungen reduziere
+Default retention: **14 days**. Make sure this matches your data
+protection obligations — for stricter requirements, reduce
 `logging.retentionDays` in `config.json`. `winston-daily-rotate-file`
-löscht ältere Dateien dann automatisch.
+will then automatically delete older files.
 
-### Long-SMS
+### Long SMS
 
-Twilio segmentiert SMS >160 Zeichen (GSM-7) bzw. >70 Zeichen (UCS-2) in
-mehrere Einzel-SMS — du zahlst pro Segment, der Empfänger sieht es als
-eine Nachricht. Für lange Outputs empfehlen wir
-`sms.maxOutputChars = 1600`, der Executor truncate mit
-`[…gekürzt…]`-Marker.
+Twilio segments SMS longer than 160 characters (GSM-7) or 70
+characters (UCS-2) into multiple individual SMS — you pay per segment,
+the recipient sees it as one message. For long outputs we recommend
+`sms.maxOutputChars = 1600`; the executor truncates with the
+`[…truncated…]` marker.
 
-### Deaktivierung
+### Disabling
 
-`"sms": { "enabled": false }` setzen und `systemctl restart`. Der
-HTTP-Server startet dann nicht mehr, WhatsApp funktioniert unverändert.
+Set `"sms": { "enabled": false }` and `systemctl restart`. The HTTP
+server will no longer start, WhatsApp keeps working unchanged.
 
 ---
 
 ## Voice via Twilio
 
-Ein Anruf auf der konfigurierten Twilio-Rufnummer führt **einen einzigen
-vorab festgelegten Befehl** aus und liest das Ergebnis per TTS vor.
-„Voice-Mode" ist damit eine Art Status-Hotline: anrufen, kurz warten,
-Uptime / Docker-Status / etc. hören, auflegen.
+A call to the configured Twilio phone number executes **a single
+pre-defined command** and reads the result aloud via TTS.
+"Voice mode" is therefore a kind of status hotline: call, wait briefly,
+hear uptime / Docker status / etc., hang up.
 
-Die Whitelist ist dieselbe wie für WhatsApp und SMS. SMS- und
-Voice-Kanal können gleichzeitig aktiv sein — der Voice-Webhook läuft auf
-einem **separaten HTTP-Port** (`voice.httpPort`, Default `3001`), damit
-beide Reverse-Proxy-Pfade unabhängig bleiben.
+The whitelist is the same as for WhatsApp and SMS. SMS and voice
+channels can be active simultaneously — the voice webhook runs on a
+**separate HTTP port** (`voice.httpPort`, default `3001`), so both
+reverse proxy paths remain independent.
 
-### Schritt 1 — Twilio-Nummer mit Voice-Capability kaufen
+### Step 1 — Buy a Twilio number with voice capability
 
-1. Auf <https://www.twilio.com/try-twilio> registrieren (falls noch nicht
-   geschehen).
-2. **Phone Numbers → Manage → Buy a number** — eine DE-Nummer wählen, die
-   **Voice-Fähigkeit** hat (steht im Listing als „Voice" angekreuzt).
-   Reine SMS-Nummern funktionieren für Voice nicht.
-3. Account SID und Auth Token notieren (gleiche wie für SMS sind OK —
-   Account-Credentials sind nicht number-spezifisch).
+1. Register at <https://www.twilio.com/try-twilio> (if you haven't
+   already).
+2. **Phone Numbers → Manage → Buy a number** — pick a DE number that
+   has **voice capability** (listed with "Voice" checked). Pure SMS
+   numbers don't work for voice.
+3. Note the Account SID and Auth Token (the same as for SMS is fine —
+   account credentials are not number-specific).
 
-### Schritt 2 — Voice-Befehl in `config.json` definieren
+### Step 2 — Define the voice command in `config.json`
 
-`voice.command` ist der exakte Befehls-String, der bei jedem Anruf
-ausgeführt wird — und **muss** identisch mit einem Eintrag in
-`whitelist.commands` sein, sonst verweigert der Service den Start
-(fail-closed).
+`voice.command` is the exact command string that runs on every call —
+and **must** be identical to an entry in `whitelist.commands`,
+otherwise the service refuses to start (fail-closed).
 
 ```json
 {
@@ -437,34 +436,34 @@ ausgeführt wird — und **muss** identisch mit einem Eintrag in
   },
   "whitelist": {
     "commands": [
-      { "name": "uptime", "command": "uptime", "description": "Server-Uptime" }
+      { "name": "uptime", "command": "uptime", "description": "Server uptime" }
     ]
   }
 }
 ```
 
-> ⚠️ `voice.command` muss exakt mit `whitelist.commands[*].command`
-> übereinstimmen — inklusive Groß-/Kleinschreibung und Argumente. Bei
-> einem Tippfehler startet der Service nicht und das Log enthält
-> `voice.command "..." ist nicht in whitelist.commands`.
+> ⚠️ `voice.command` must match exactly one of
+> `whitelist.commands[*].command` — including case and arguments. If
+> there's a typo, the service won't start and the log will contain
+> `voice.command "..." is not in whitelist.commands`.
 
-### Schritt 3 — Inbound-Voice-Webhook konfigurieren
+### Step 3 — Configure the inbound voice webhook
 
-In der Twilio-Konsole: **Phone Numbers → Active Numbers → Deine Voice-
-Nummer → Configuration**:
+In the Twilio console: **Phone Numbers → Active Numbers → Your Voice
+Number → Configuration**:
 
-- **„A CALL COMES IN"** → **Webhook** → `https://<deine-domain>/voice/inbound`
-- HTTP-Methode: **POST**
-- Speichern.
+- **"A CALL COMES IN"** → **Webhook** → `https://<your-domain>/voice/inbound`
+- HTTP method: **POST**
+- Save.
 
-> ⚠️ **Nicht „A MESSAGE COMES IN"** verwechseln — das ist der SMS-Webhook.
-> Die Voice-Nummer braucht zwingend einen separaten Eintrag unter
-> „A CALL COMES IN", sonst erreicht dich kein Anruf.
+> ⚠️ Don't confuse this with **"A MESSAGE COMES IN"** — that's the
+> SMS webhook. The voice number requires a separate entry under "A
+> CALL COMES IN", otherwise no call will reach you.
 
-### Schritt 4 — Reverse-Proxy um Voice-Route erweitern
+### Step 4 — Extend the reverse proxy with the voice route
 
-Der Reverse-Proxy muss `/voice/inbound` an Port `3001` weiterleiten.
-Beispiel für **Caddy**:
+The reverse proxy must forward `/voice/inbound` to port `3001`.
+Example for **Caddy**:
 
 ```
 bot.example.com {
@@ -479,141 +478,141 @@ bot.example.com {
 }
 ```
 
-Für **nginx** einen zweiten `location`-Block für `/voice/inbound`
-hinzufügen, der analog zu `/sms/inbound` auf `127.0.0.1:3001` proxied.
-Cloudflare-Tunnel: zweite `ingress`-Regel mit `service: http://127.0.0.1:3001`.
+For **nginx**, add a second `location` block for `/voice/inbound` that
+proxies to `127.0.0.1:3001` analogous to `/sms/inbound`. Cloudflare
+Tunnel: a second `ingress` rule with `service: http://127.0.0.1:3001`.
 
-> ⚠️ **Beide Routen brauchen `X-Forwarded-*`-Header**, sonst schlägt die
-> Twilio-Signaturprüfung fehl — Twilio hasht die öffentliche URL, nicht
+> ⚠️ **Both routes need `X-Forwarded-*` headers**, otherwise Twilio
+> signature verification will fail — Twilio hashes the public URL, not
 > `http://127.0.0.1:3001/...`.
 
-### Schritt 5 — Testen
+### Step 5 — Test
 
 ```bash
 sudo systemctl restart whatsapp-shell-bot
 sudo journalctl -u whatsapp-shell-bot -f
 ```
 
-Von einer **whitelisted Nummer** die Twilio-Voice-Nummer anrufen. Du
-hörst „Bitte warten." und dann das TTS-Ergebnis (z.B. „OK. 14 Uhr 32,
-up 5 Tage …"). Im Log:
+From a **whitelisted number**, call the Twilio voice number. You'll
+hear "Please wait." and then the TTS result (e.g. "OK. 14:32, up 5
+days …"). In the log:
 
 ```
 info: voice_reply_sent  callSid=CAxxxx length=68
 ```
 
-Anruf von einer **nicht-whitelisted Nummer** → Anruf wird sofort mit
-„Bitte warten." beendet, kein Befehl läuft, kein TTS-Output. Im Log
-taucht `unknown_number` auf.
+A call from a **non-whitelisted number** → the call ends immediately
+with "Please wait.", no command runs, no TTS output. The log contains
+`unknown_number`.
 
-### Wie es funktioniert (Architektur)
+### How It Works (Architecture)
 
-1. Twilio sendet `POST /voice/inbound` mit `CallSid`, `From`, …
-2. Der Service prüft die Twilio-Signatur gegen die öffentliche URL
-   (rekonstruiert aus `X-Forwarded-*`).
-3. Service antwortet **sofort** mit `<Response><Say>Bitte warten.</Say>
-   <Pause length="35"/></Response>`. `<Say>` gibt direkt Feedback; `<Pause>`
-   hält den Call danach still offen, bis das Ergebnis eingespielt wird. Die
-   Pausenlänge kommt aus `voice.ackPauseSeconds` (`35` ist der Default).
-4. Parallel läuft der konfigurierte Befehl via `child_process.execFile`
-   (keine Shell, wie überall sonst).
-5. Wenn der Befehl fertig ist, ruft der Service
-   `client.calls(callSid).update({twiml: '<Response><Say>...</Say></Response>'})`
-   auf. Twilio spricht die TwiML **mid-call** — der Anrufer wartet
-   typischerweise 1–3 Sekunden, dann kommt das Ergebnis.
+1. Twilio sends `POST /voice/inbound` with `CallSid`, `From`, …
+2. The service verifies the Twilio signature against the public URL
+   (reconstructed from `X-Forwarded-*`).
+3. The service replies **immediately** with `<Response><Say>Please wait.</Say>
+   <Pause length="35"/></Response>`. `<Say>` provides instant feedback;
+   `<Pause>` keeps the call silently open afterwards until the result
+   is injected. The pause length comes from `voice.ackPauseSeconds`
+   (`35` is the default).
+4. In parallel, the configured command runs via `child_process.execFile`
+   (no shell, as everywhere else).
+5. When the command finishes, the service calls
+   `client.calls(callSid).update({twiml: '<Response><Say>...</Say></Response>'})`.
+   Twilio speaks the TwiML **mid-call** — the caller typically waits
+   1–3 seconds before the result arrives.
 
-### Kosten-Hinweis
+### Cost Note
 
-Twilio berechnet die Anrufdauer pro angefangener Minute (DE-Nummer
-typischerweise ~0,01–0,02 €/Minute). Ein typischer Status-Anruf dauert
-20–60 Sekunden (TTS liest ca. 12 Zeichen/Sekunde). Bei vielen Anrufen
-am Tag lohnt sich ein Blick auf die Twilio-Abrechnung.
+Twilio charges for call duration per started minute (DE number
+typically ~€0.01–0.02/minute). A typical status call lasts 20–60
+seconds (TTS reads ~12 characters/second). For many calls per day, it's
+worth keeping an eye on the Twilio billing.
 
-### Deaktivierung
+### Disabling
 
-`"voice": { "enabled": false }` setzen und `systemctl restart`. Der
-Voice-HTTP-Server startet dann nicht mehr, WhatsApp und SMS laufen
-unverändert.
+Set `"voice": { "enabled": false }` and `systemctl restart`. The voice
+HTTP server will no longer start, WhatsApp and SMS keep working
+unchanged.
 
-Für akzeptierte Anrufe muss die Pause länger als `security.timeoutMs` plus
-einige Sekunden REST-Puffer sein. Der Default `35` passt zum Standard-Timeout
-von 30 Sekunden. Höhere Werte halten den Call bei einem fehlgeschlagenen
-`calls.update` entsprechend länger offen und können zusätzliche Kosten
-verursachen.
+For accepted calls, the pause must be longer than
+`security.timeoutMs` plus a few seconds of REST buffer. The default
+`35` matches the standard timeout of 30 seconds. Higher values keep
+the call open longer if `calls.update` fails and may incur additional
+cost.
 
-### Voice-spezifische Gotchas
+### Voice-Specific Gotchas
 
-- **Der Ack braucht `<Say>` plus `<Pause>`.** `<Say>` allein ist nach der
-  Ansage fertig; Twilio würde anschließend das TwiML-Dokument beenden und
-  auflegen. `<Pause>` hält den Call für `voice.ackPauseSeconds` offen, damit
-  `client.calls(callSid).update` das Ergebnis einspielen kann.
-- **`voice.command` muss zur Whitelist passen.** Service startet sonst
-  nicht (fail-closed).
-- **Call bricht direkt nach „Bitte warten." ab / `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`
-  im Log:** Der Reverse-Proxy setzt `X-Forwarded-For`, aber Express muss diesem
-  Loopback-Hop vertrauen, damit `express-rate-limit` die Client-IP ermitteln
-  kann. Der Kanal setzt dafür `app.set('trust proxy', 'loopback')` (der Server
-  lauscht auf `127.0.0.1`, der Proxy verbindet sich lokal). Betrifft SMS und
-  Voice gleichermaßen. Kein Handeln nötig, außer der Fehler taucht nach eigenen
-  Änderungen wieder auf.
-- **Hot-Reload der Whitelist funktioniert, aber `voice.command`,
+- **The ack needs `<Say>` plus `<Pause>`.** `<Say>` alone is done after
+  speaking; Twilio would then end the TwiML document and hang up.
+  `<Pause>` keeps the call open for `voice.ackPauseSeconds` so that
+  `client.calls(callSid).update` can inject the result.
+- **`voice.command` must match the whitelist.** Otherwise the service
+  won't start (fail-closed).
+- **Call hangs up immediately after "Please wait." /
+  `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` in the log:** The reverse proxy
+  sets `X-Forwarded-For`, but Express must trust this loopback hop in
+  order for `express-rate-limit` to determine the client IP. The
+  channel sets `app.set('trust proxy', 'loopback')` for this (the
+  server listens on `127.0.0.1`, the proxy connects locally). Affects
+  SMS and voice equally. No action needed unless the error reappears
+  after your own changes.
+- **Hot reload of the whitelist works, but `voice.command`,
   `voice.httpPort`, `voice.webhookPath`, `voice.twilioPhoneNumber`
-  erfordern einen `systemctl restart`** — genau wie beim SMS-Kanal.
-- **Anrufer legt auf vor Befehlsende:** Der `client.calls(callSid).update`
-  schlägt mit Twilio-Code `13231` (call ended) oder `20404` (CallSid
-  gone) fehl. Das wird als Warnung geloggt, nicht als Fehler.
+  require a `systemctl restart`** — same as with the SMS channel.
+- **Caller hangs up before command ends:** `client.calls(callSid).update`
+  fails with Twilio code `13231` (call ended) or `20404` (CallSid
+  gone). This is logged as a warning, not an error.
 
 ---
 
----
-
-## Update-Prozess
+## Update Process
 
 ```bash
 cd /opt/whatsapp-shell-bot
-sudo git pull                 # oder neuen Tarball entpacken
-sudo bash scripts/install.sh  # idempotent — überschreibt nur was nötig ist
+sudo git pull                 # or extract a new tarball
+sudo bash scripts/install.sh  # idempotent — only overwrites what's needed
 sudo systemctl restart whatsapp-shell-bot
 ```
 
-> ⚠️ `install.sh` behält eine vorhandene `/opt/whatsapp-shell-bot/config.json`
-> bewusst unverändert. Nach einem Update mit neuen Funktionen (z.B. Voice)
-> deshalb `config.example.json` mit der bestehenden Konfiguration vergleichen
-> und neue Blöcke/Optionen manuell ergänzen. Fehlt der `voice`-Block, gilt der
-> Kanal als deaktiviert und auf `voice.httpPort` startet kein Listener.
+> ⚠️ `install.sh` deliberately leaves an existing
+> `/opt/whatsapp-shell-bot/config.json` unchanged. After an update with
+> new features (e.g. voice), compare `config.example.json` with your
+> existing configuration and manually add new blocks/options. If the
+> `voice` block is missing, the channel is treated as disabled and no
+> listener starts on `voice.httpPort`.
 
-`install.sh` ist **idempotent**: Es überschreibt vorhandene Konfiguration
-nur, wenn du das explizit erlaubst.
+`install.sh` is **idempotent**: it only overwrites existing
+configuration if you explicitly allow it.
 
 ---
 
-## Sicherheitshinweise
+## Security Notes
 
-### Architektur
+### Architecture
 
-- **Dedizierter Service-User `wabot`** (kein Login, kein Home-Verzeichnis).
-- **systemd-Hardening aktiv**: `NoNewPrivileges`, `ProtectSystem=strict`,
-  `ProtectHome`, Capability-Drop, kein SUID/SGID, keine Namespaces,
-  kein Realtime-Scheduling, Locked Personality.
-- **`MemoryDenyWriteExecute`** ist bewusst **deaktiviert** — Chromium's
-  V8-JIT braucht W^X-disabled Memory-Mappings und würde sonst sofort
-  crashen. Stattdessen verlassen wir uns auf `NoNewPrivileges` und die
-  Capability-Drops.
+- **Dedicated service user `wabot`** (no login, no home directory).
+- **systemd hardening enabled**: `NoNewPrivileges`, `ProtectSystem=strict`,
+  `ProtectHome`, capability drop, no SUID/SGID, no namespaces, no
+  realtime scheduling, locked personality.
+- **`MemoryDenyWriteExecute`** is deliberately **disabled** —
+  Chromium's V8 JIT needs W^X-disabled memory mappings and would
+  crash immediately otherwise. We instead rely on `NoNewPrivileges`
+  and the capability drops.
 
-### Whitelist-Validierung
+### Whitelist Validation
 
-- Kommandos müssen **exakt** einem Eintrag in `whitelist.commands`
-  entsprechen.
-- Verboten: `;`, `&`, `|`, `` ` ``, `$`, `>`, `<`, `*`, `?`, `(`, `)`,
-  `{`, `}`, `\\`, Newlines, Tabs.
-- Ausführung läuft über `child_process.execFile` — **keine Shell**, kein
-  String-Interpretation. Selbst wenn die Whitelist kompromittiert wäre,
-  würde keine Shell-Injection möglich sein.
+- Commands must match **exactly** an entry in `whitelist.commands`.
+- Forbidden: `;`, `&`, `|`, `` ` ``, `$`, `>`, `<`, `*`, `?`, `(`,
+  `)`, `{`, `}`, `\\`, newlines, tabs.
+- Execution runs through `child_process.execFile` — **no shell**, no
+  string interpretation. Even if the whitelist were compromised, no
+  shell injection would be possible.
 
-### Audit-Trail
+### Audit Trail
 
-Jede eingehende Nachricht (akzeptiert oder abgelehnt) wird unter
-`/var/log/whatsapp-shell-bot/whatsapp-shell-bot-YYYY-MM-DD.log` geloggt:
+Every incoming message (accepted or rejected) is logged under
+`/var/log/whatsapp-shell-bot/whatsapp-shell-bot-YYYY-MM-DD.log`:
 
 ```json
 {
@@ -625,170 +624,171 @@ Jede eingehende Nachricht (akzeptiert oder abgelehnt) wird unter
 }
 ```
 
-Logs rotieren täglich, Aufbewahrung: 14 Tage (konfigurierbar).
+Logs rotate daily, retention: 14 days (configurable).
 
-### Ausgehende Verbindungen
+### Outbound Connections
 
-Der Bot baut von sich aus nur Verbindungen zu WhatsApp-Servern und zur
-Twilio-API auf. Es findet **keine** ungewollte Datenübertragung statt.
-Es gibt auch keine Update-Checks oder Telemetrie.
+The bot only connects on its own to WhatsApp servers and the Twilio
+API. **No** unwanted data transfer takes place. There are also no
+update checks or telemetry.
 
-| Host                    | Zweck                       |
-|-------------------------|-----------------------------|
-| `web.whatsapp.com`      | WhatsApp-WebSocket          |
-| `mmg.whatsapp.com`      | WhatsApp-Multimedia-Upload  |
-| `api.twilio.com`        | SMS-Antworten via REST      |
+| Host               | Purpose                      |
+|--------------------|------------------------------|
+| `web.whatsapp.com` | WhatsApp WebSocket           |
+| `mmg.whatsapp.com` | WhatsApp multimedia upload   |
+| `api.twilio.com`   | SMS replies via REST         |
 
-### SMS-spezifische Hardening-Maßnahmen
+### SMS-Specific Hardening
 
-- **`httpHost: 127.0.0.1`** — der SMS-Server lauscht **niemals** auf
-  öffentlichen Interfaces. Nur der Reverse-Proxy darf ihn erreichen.
-- **Twilio-Signaturprüfung** ist standardmäßig aktiv
-  (`sms.validateSignature = true`). Bei `false` loggt der Service alle
-  60 Sekunden eine Warnung — du wirst nicht übersehen, dass die
-  Prüfung aus ist.
-- **`helmet`** + **`express-rate-limit`** (30 Req/Min/IP) auf dem
-  Webhook. Brute-Force-Versuche gegen die URL werden dadurch
-  geblockt.
-- **systemd-Hardening:** `RestrictAddressFamilies=AF_INET AF_INET6
-  AF_UNIX` — exotische Socket-Familien sind gesperrt.
-- **Webhook-URL nur per HTTPS** — Twilio weigert sich, an HTTP-
-  Endpoints zu posten (bzw. die Signaturprüfung schlägt fehl).
+- **`httpHost: 127.0.0.1`** — the SMS server **never** listens on
+  public interfaces. Only the reverse proxy may reach it.
+- **Twilio signature verification** is active by default
+  (`sms.validateSignature = true`). When `false`, the service logs a
+  warning every 60 seconds — you won't miss that verification is off.
+- **`helmet`** + **`express-rate-limit`** (30 req/min/IP) on the
+  webhook. Brute-force attempts against the URL are thereby blocked.
+- **systemd hardening:** `RestrictAddressFamilies=AF_INET AF_INET6
+  AF_UNIX` — exotic socket families are blocked.
+- **Webhook URL only via HTTPS** — Twilio refuses to POST to HTTP
+  endpoints (or signature verification fails).
 
-### Was dieses Tool **nicht** kann
+### What This Tool **Cannot** Do
 
-- Keine Datei-Uploads von dir an den Bot (nur Text-Nachrichten).
-- Keine Antwort an andere Nummern als die, die den Befehl gesendet haben.
-- Keine Ausführung von Kommandos, die nicht in der Whitelist stehen.
-- Keine Gruppeninteraktion (WhatsApp; SMS hat keine Gruppen).
-- Kein direkter Empfang aus dem Internet (Reverse-Proxy pflicht).
+- No file uploads from you to the bot (text messages only).
+- No replies to numbers other than the one that sent the command.
+- No execution of commands not in the whitelist.
+- No group interaction (WhatsApp; SMS has no groups).
+- No direct reception from the internet (reverse proxy required).
 
 ---
 
-## Deinstallation
+## Uninstallation
 
 ```bash
-sudo bash scripts/uninstall.sh           # Standard: Logs/Session bleiben
-sudo bash scripts/uninstall.sh --purge  # Auch Logs löschen
-sudo bash scripts/uninstall.sh --full   # Komplett entfernen (inkl. User)
+sudo bash scripts/uninstall.sh           # Default: logs/session are kept
+sudo bash scripts/uninstall.sh --purge  # Also delete logs
+sudo bash scripts/uninstall.sh --full   # Completely remove (incl. user)
 ```
 
 ---
 
 ## Troubleshooting
 
-### „Kein TTY erkannt"-Fehler beim manuellen Start
+### "No TTY detected" error on manual start
 
-Du startest den Bot im Hintergrund ohne TTY. Folge der Anleitung in der
-Fehlermeldung:
+You're starting the bot in the background without a TTY. Follow the
+instructions in the error message:
 
 ```bash
 sudo systemctl stop whatsapp-shell-bot
 sudo -u wabot /usr/bin/node /opt/whatsapp-shell-bot/src/index.js
-# QR scannen, dann Ctrl+C
+# Scan QR, then Ctrl+C
 sudo systemctl start whatsapp-shell-bot
 ```
 
-### Chromium-Sandbox-Fehler
+### Chromium Sandbox Error
 
 ```
 Failed to launch the browser process! ... No usable sandbox!
 ```
 
-Chromium läuft als unprivilegierter User, kann aber seinen eigenen Sandbox-
-User nicht anlegen, weil `PrivateUsers=true` oder ähnliche Optionen in
-der systemd-Unit das verhindern. Wir verwenden deshalb explizit
-`--no-sandbox` in den Puppeteer-Args (siehe `src/auth.js`). Wenn du eine
-stärkere Sandbox willst, kannst du `chrome-sandbox` manuell einrichten,
-aber das ist außerhalb des Scopes dieses Setups.
+Chromium runs as an unprivileged user but cannot create its own
+sandbox user because `PrivateUsers=true` or similar options in the
+systemd unit prevent this. We therefore explicitly use `--no-sandbox`
+in the Puppeteer args (see `src/auth.js`). If you want a stronger
+sandbox, you can set up `chrome-sandbox` manually, but that's outside
+the scope of this setup.
 
-### Fehlende Libraries
+### Missing Libraries
 
 ```
 error while loading shared libraries: libnss3.so ...
 ```
 
-→ Install-Script erneut ausführen, es installiert alle nötigen Pakete:
+→ Re-run the install script, it installs all needed packages:
 
 ```bash
 sudo bash scripts/install.sh
 ```
 
-### WhatsApp-Ban-Warnung
+### WhatsApp Ban Warning
 
-Wenn du zu oft QR-Codes anforderst oder die Verbindung in verdächtigen
-Mustern abreißt, kann WhatsApp deinen Account temporär oder dauerhaft
-sperren. Das ist eine **Risiko-Inkaufnahme** bei der Nutzung von
-`whatsapp-web.js`. Empfehlung: nur auf einem separaten Zweitaccount
-verwenden.
+If you request QR codes too often or the connection drops in
+suspicious patterns, WhatsApp may temporarily or permanently ban
+your account. This is an **accepted risk** when using
+`whatsapp-web.js`. Recommendation: only use it on a separate
+secondary account.
 
-### Service startet nicht — `journalctl` zeigt Fehler
+### Service doesn't start — `journalctl` shows errors
 
 ```bash
 sudo journalctl -u whatsapp-shell-bot -n 100 --no-pager
 ```
 
-Häufige Ursachen:
+Common causes:
 
-- `config.json` ist ungültiges JSON → mit `jq . /opt/whatsapp-shell-bot/config.json` prüfen.
-- Pfad `/var/log/whatsapp-shell-bot` existiert nicht → `sudo mkdir -p /var/log/whatsapp-shell-bot && sudo chown wabot:wabot /var/log/whatsapp-shell-bot`.
-- Chromium-Binary nicht gefunden → `which chromium` (sollte `/usr/bin/chromium` zurückgeben). Falls anders: `Environment=PUPPETEER_EXECUTABLE_PATH=/pfad/zu/chromium` in der Unit setzen.
+- `config.json` is invalid JSON → check with
+  `jq . /opt/whatsapp-shell-bot/config.json`.
+- Path `/var/log/whatsapp-shell-bot` doesn't exist →
+  `sudo mkdir -p /var/log/whatsapp-shell-bot && sudo chown wabot:wabot /var/log/whatsapp-shell-bot`.
+- Chromium binary not found → `which chromium` (should return
+  `/usr/bin/chromium`). If different: set
+  `Environment=PUPPETEER_EXECUTABLE_PATH=/path/to/chromium` in the unit.
 
-### Hot-Reload der Whitelist funktioniert nicht
+### Hot Reload of the Whitelist Doesn't Work
 
 ```bash
 sudo journalctl -u whatsapp-shell-bot -f | grep -i config
 ```
 
-Du solltest `Konfiguration zur Laufzeit neu geladen.` sehen. Falls nicht:
-fs.watch kann auf manchen Dateisystemen (z.B. NFS) unzuverlässig sein.
+You should see `Configuration reloaded at runtime.` If not:
+`fs.watch` can be unreliable on some file systems (e.g. NFS).
 Workaround: `sudo systemctl restart whatsapp-shell-bot`.
 
-### SMS: Twilio-Webhooks liefern 403
+### SMS: Twilio webhooks return 403
 
-Im Log steht `sms_signature_invalid`. Ursachen (in Reihenfolge der
-Wahrscheinlichkeit):
+The log shows `sms_signature_invalid`. Causes (in order of
+probability):
 
-1. **Reverse-Proxy schreibt den Body um.** Twilio signiert den
-   exakten Body. nginx braucht `proxy_pass_request_body on`, Caddy
-   default ist OK. Bei Cloudflare-Tunnel: `httpHostHeader`-Setting
-   prüfen.
-2. **`X-Forwarded-Proto` / `X-Forwarded-Host` fehlen.** Der Service
-   baut die öffentliche URL aus diesen Headern. Ohne sie hasht Twilio
-   gegen `http://127.0.0.1:3000/...`, was nicht zur Twilio-Sicht
-   (`https://bot.example.com/...`) passt.
-3. **Falscher Auth Token.** Überprüfe den Token in `config.json` —
-   er muss exakt dem Token aus der Twilio-Konsole entsprechen.
+1. **Reverse proxy rewrites the body.** Twilio signs the exact body.
+   nginx needs `proxy_pass_request_body on`, Caddy default is fine.
+   For Cloudflare Tunnel: check the `httpHostHeader` setting.
+2. **`X-Forwarded-Proto` / `X-Forwarded-Host` are missing.** The
+   service builds the public URL from these headers. Without them,
+   Twilio hashes against `http://127.0.0.1:3000/...`, which doesn't
+   match Twilio's view (`https://bot.example.com/...`).
+3. **Wrong Auth Token.** Verify the token in `config.json` — it must
+   match exactly the token from the Twilio console.
 
-### SMS: Twilio sendet, aber keine Antwort kommt
+### SMS: Twilio sends, but no reply arrives
 
-1. Im Log nach `sms_reply_sent` suchen. Fehlt der Eintrag, ist die
-   Command-Ausführung gescheitert.
-2. Wenn `sms_reply_sent` mit einem Error kommt: Twilio-Credentials
-   prüfen (Account SID, Auth Token, From-Nummer im E.164-Format).
-3. Twilio-Konsole → **Monitor → Logs → Errors** zeigt HTTP-Fehler
-   der ausgehenden SMS.
+1. Search the log for `sms_reply_sent`. If the entry is missing, the
+   command execution failed.
+2. If `sms_reply_sent` comes with an error: check Twilio credentials
+   (Account SID, Auth Token, From number in E.164 format).
+3. Twilio console → **Monitor → Logs → Errors** shows HTTP errors
+   of outgoing SMS.
 
-### SMS: Service startet nicht mit `sms.enabled=true`
+### SMS: Service doesn't start with `sms.enabled=true`
 
 ```bash
 sudo journalctl -u whatsapp-shell-bot -n 50 --no-pager
 ```
 
-Häufigste Ursache: `twilioAccountSid` / `twilioAuthToken` /
-`twilioPhoneNumber` fehlen in `config.json`. Der Service failt
-bewusst **closed** — wenn SMS explizit angefordert wurde und nicht
-booten kann, startet der ganze Service nicht (sonst hätte der Admin
-stillschweigend nur noch WhatsApp).
+Most common cause: `twilioAccountSid` / `twilioAuthToken` /
+`twilioPhoneNumber` are missing in `config.json`. The service
+deliberately fails **closed** — when SMS is explicitly requested but
+can't boot, the entire service won't start (otherwise the admin
+would silently be left with WhatsApp-only).
 
-### Voice: „An application error has occurred"
+### Voice: "An application error has occurred"
 
-Die Ansage kommt von Twilio, wenn der **initiale Voice-Webhook** keine
-verwertbare 2xx-TwiML-Antwort liefert. Zuerst in Twilio unter
-**Monitor → Logs → Calls → Debug Events** den HTTP-Status prüfen:
+This announcement comes from Twilio when the **initial voice webhook**
+doesn't deliver a usable 2xx TwiML response. First check the HTTP
+status in Twilio under **Monitor → Logs → Calls → Debug Events**:
 
-1. **502 / 504 / Fehler 11200:** Der Reverse-Proxy erreicht den lokalen
-   Voice-Server nicht. Prüfen:
+1. **502 / 504 / error 11200:** The reverse proxy can't reach the
+   local voice server. Check:
 
    ```bash
    sudo systemctl --no-pager --full status whatsapp-shell-bot
@@ -796,52 +796,56 @@ verwertbare 2xx-TwiML-Antwort liefert. Zuerst in Twilio unter
    sudo ss -ltnp | grep ':3001'
    ```
 
-   Im Journal muss `Voice-HTTP-Server lauscht auf
-   127.0.0.1:3001/voice/inbound` stehen. Fehlt der Listener, zuerst prüfen,
-   ob der aktuelle Code installiert ist und `/opt/whatsapp-shell-bot/config.json`
-   einen `voice`-Block mit `enabled: true` enthält. Bei Cloudflare Tunnel muss
-   der öffentliche Host auf `http://127.0.0.1:3001` zeigen.
-2. **403:** Im Journal nach `voice_signature_invalid` suchen. Die geloggte
-   `publicUrl` muss exakt Twilios Webhook-URL entsprechen. Danach
-   `X-Forwarded-Proto`, `X-Forwarded-Host`, unveränderten POST-Body und Auth
-   Token prüfen. `voice.validateSignature` nicht dauerhaft deaktivieren.
-3. **200, „Bitte warten" hörbar, aber kein Ergebnis:** Im Journal nach
-   `voice_ack_sent`, `command_result`, `voice_reply_sent` oder
-   `Voice-Antwort fehlgeschlagen` suchen. `13231`/`20404` bedeutet, dass der
-   Call vor der Ergebnis-Injektion beendet wurde. Für Befehle nahe am Timeout
-   `voice.ackPauseSeconds` passend erhöhen (maximal 600) oder einen schnelleren
-   Command verwenden.
-4. **Kein Voice-Logeintrag:** Twilio verwendet wahrscheinlich URL/Pfad oder
-   Methode falsch. Unter **A CALL COMES IN** muss der Webhook
-   `https://<domain>/voice/inbound` mit Methode **POST** stehen.
+   The journal must contain `Voice HTTP server listening on
+   127.0.0.1:3001/voice/inbound`. If the listener is missing, first
+   check whether the current code is installed and whether
+   `/opt/whatsapp-shell-bot/config.json` contains a `voice` block with
+   `enabled: true`. With Cloudflare Tunnel, the public host must
+   point to `http://127.0.0.1:3001`.
+2. **403:** Look in the journal for `voice_signature_invalid`. The
+   logged `publicUrl` must match Twilio's webhook URL exactly. Then
+   check `X-Forwarded-Proto`, `X-Forwarded-Host`, unmodified POST
+   body, and Auth Token. Don't disable `voice.validateSignature`
+   permanently.
+3. **200, "Please wait" audible, but no result:** Search the journal
+   for `voice_ack_sent`, `command_result`, `voice_reply_sent`, or
+   `Voice reply failed`. `13231`/`20404` means the call ended before
+   the result could be injected. For commands close to the timeout,
+   raise `voice.ackPauseSeconds` appropriately (max 600) or use a
+   faster command.
+4. **No voice log entry:** Twilio is likely using the wrong URL/path
+   or method. Under **A CALL COMES IN**, the webhook must be
+   `https://<domain>/voice/inbound` with method **POST**.
 
-### Voice: Anruf wird sofort aufgelegt / kein TTS
+### Voice: Call hangs up immediately / no TTS
 
-1. **Twilio-Konsole prüfen:** ist „A CALL COMES IN" auf die richtige
-   `/voice/inbound`-URL gesetzt? Steht die Nummer auf **Voice-fähig**?
-2. **Reverse-Proxy** muss `/voice/inbound` an `127.0.0.1:3001` (oder den
-   konfigurierten `voice.httpPort`) weiterleiten. Caddy / nginx-Snippets
-   siehe „Voice via Twilio" oben.
-3. **Signaturprüfung** schlägt fehl → Log enthält `voice_signature_invalid`.
-   Ursachen sind identisch zum SMS-Problem: `X-Forwarded-*`-Header
-   fehlen, oder der Body wird vom Reverse-Proxy verändert.
-4. **Service startet nicht** mit `voice.enabled=true` und
-   `voice.command: "xyz"`: prüfen, ob `"xyz"` exakt in
-   `whitelist.commands` steht. Fail-closed: der Service bootet nicht
-   bei Tippfehlern.
-5. **TTS kommt nicht an:** wenn der Anrufer auflegt oder
-   `voice.ackPauseSeconds` abläuft, bevor der Befehl fertig ist, ist der Call
-   bereits beendet (siehe `voice_reply_sent` fehlt im Log). Für längere
-   Befehle die Ack-Pause passend erhöhen, `security.timeoutMs` niedriger
-   setzen oder `voice.command` durch einen schnelleren Befehl ersetzen.
+1. **Check the Twilio console:** is "A CALL COMES IN" set to the
+   correct `/voice/inbound` URL? Is the number **voice-capable**?
+2. **Reverse proxy** must forward `/voice/inbound` to `127.0.0.1:3001`
+   (or the configured `voice.httpPort`). See Caddy / nginx snippets
+   in "Voice via Twilio" above.
+3. **Signature verification** fails → log contains
+   `voice_signature_invalid`. Causes are identical to the SMS issue:
+   `X-Forwarded-*` headers missing, or the body is being modified by
+   the reverse proxy.
+4. **Service won't start** with `voice.enabled=true` and
+   `voice.command: "xyz"`: check whether `"xyz"` is exactly listed in
+   `whitelist.commands`. Fail-closed: the service doesn't boot on
+   typos.
+5. **TTS doesn't arrive:** if the caller hangs up or
+   `voice.ackPauseSeconds` expires before the command finishes, the
+   call is already ended (see `voice_reply_sent` missing in the log).
+   For longer commands, raise the ack pause accordingly, lower
+   `security.timeoutMs`, or replace `voice.command` with a faster
+   command.
 
 ---
 
-## Lizenz
+## License
 
 MIT
 
-## Mitwirkende
+## Contributing
 
-Dieses Projekt ist absichtlich klein gehalten. Pull Requests willkommen —
-bitte mit Tests.
+This project is intentionally kept small. Pull requests welcome —
+please include tests.
