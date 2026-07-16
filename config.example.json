@@ -28,6 +28,7 @@
     "validateSignature": true,
     "maxOutputChars": 500,
     "rateLimitPerMinute": 30,
+    "ackPauseSeconds": 35,
     "command": "uptime"
   },
   "whitelist": {

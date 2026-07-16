@@ -8,13 +8,15 @@
  * Decision: We keep the router transport-free. Both WhatsApp and SMS call
  * into router.handleMessage() with a normalised shape:
  *
- *   { channel, from, body, reply, metadata }
+ *   { channel, from, body, reply, metadata, onAccepted }
  *
- * - `channel`: 'whatsapp' | 'sms' — used for log labels only.
+ * - `channel`: 'whatsapp' | 'sms' | 'voice' — used for log labels only.
  * - `from`: digits-only phone number in E.164 without the leading '+'.
  * - `body`: trimmed command string.
  * - `reply(text)`: channel-specific reply function (Promise).
  * - `metadata`: free-form object for log enrichment (pushName, MessageSid, …).
+ * - `onAccepted()`: optional hook after validation, before execution. Voice
+ *   uses it to acknowledge and hold the call without waiting for the command.
  *
  * Channel-specific concerns (group filtering, signature validation, reply
  * transport) live in their respective modules under src/channels/.
@@ -59,11 +61,12 @@ function createRouter(initialCfg) {
    * Main entry point. Channel-agnostic.
    *
    * @param {object} msg
-   *   @param {string} msg.channel    'whatsapp' | 'sms'
+   *   @param {string} msg.channel    'whatsapp' | 'sms' | 'voice'
    *   @param {string} msg.from       digits-only phone number
    *   @param {string} msg.body       trimmed message body
    *   @param {Function} msg.reply    async (text) => void — channel-specific
    *   @param {object} [msg.metadata] extra fields for log enrichment
+   *   @param {Function} [msg.onAccepted] async () => void — after validation
    */
   async function handleMessage(msg) {
     const channel = msg && typeof msg.channel === 'string' ? msg.channel : 'unknown';
@@ -73,6 +76,9 @@ function createRouter(initialCfg) {
     const metadata = msg && typeof msg.metadata === 'object' && msg.metadata !== null
       ? msg.metadata
       : {};
+    const onAccepted = msg && typeof msg.onAccepted === 'function'
+      ? msg.onAccepted
+      : async () => {};
     const truncatedBody = truncateBody(body);
 
     // 1. Number whitelist.
@@ -102,7 +108,19 @@ function createRouter(initialCfg) {
       return;
     }
 
-    // 3. Execute the whitelisted command.
+    // 3. Let transports acknowledge an accepted request before execution. Voice
+    // sends its TwiML hold response here so rejected callers are never held.
+    try {
+      await onAccepted();
+    } catch (err) {
+      logger.error(
+        `Annahme-Antwort fehlgeschlagen (channel=${channel}, sender=${senderNumber}): ${err.message}`,
+        { stack: err.stack }
+      );
+      return;
+    }
+
+    // 4. Execute the whitelisted command.
     const cmdEntry = validation.entry;
     logger.info('executed', {
       channel,
@@ -128,7 +146,7 @@ function createRouter(initialCfg) {
       cwd: process.cwd(),
     });
 
-    // 4. Audit-log the result.
+    // 5. Audit-log the result.
     logger.info('command_result', {
       channel,
       sender: senderNumber,
@@ -141,7 +159,7 @@ function createRouter(initialCfg) {
       ...metadata,
     });
 
-    // 5. Reply via the channel-specific transport. Pass channel so the
+    // 6. Reply via the channel-specific transport. Pass channel so the
     //    executor can pick a TTS-friendly formatter for voice.
     const replyText = formatResult(result, { channel });
     try {

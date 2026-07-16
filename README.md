@@ -161,6 +161,7 @@ Restart nicht nötig.**
 | `voice.validateSignature`           | boolean       | `true`           | Twilio-Signaturprüfung aktiv (Pflicht in Produktion) |
 | `voice.maxOutputChars`              | number        | `500`            | TTS-Output-Limit (Twilio `<Say>` limitiert bei 4000) |
 | `voice.rateLimitPerMinute`          | number        | `30`             | Rate-Limit pro Quell-IP |
+| `voice.ackPauseSeconds`             | number        | `35`             | Stille Haltezeit nach „Bitte warten“, bis das Ergebnis per TwiML eingespielt wird (1–600 Sekunden) |
 | `voice.command`                     | string        | —                | **Eine** Whitelist-Befehls-Zeile, die bei jedem Anruf läuft. Muss identisch mit einem `whitelist.commands[*].command` sein — sonst startet der Service nicht. |
 | `whitelist.numbers`                 | string-array  | `[]`             | Telefonnummern in E.164 **ohne** `+` |
 | `whitelist.commands`                | object-array  | `[]`             | Vorab freigegebene Kommandos |
@@ -431,6 +432,7 @@ ausgeführt wird — und **muss** identisch mit einem Eintrag in
     "httpHost": "127.0.0.1",
     "validateSignature": true,
     "maxOutputChars": 500,
+    "ackPauseSeconds": 35,
     "command": "uptime"
   },
   "whitelist": {
@@ -510,8 +512,9 @@ taucht `unknown_number` auf.
 2. Der Service prüft die Twilio-Signatur gegen die öffentliche URL
    (rekonstruiert aus `X-Forwarded-*`).
 3. Service antwortet **sofort** mit `<Response><Say>Bitte warten.</Say>
-   </Response>`. Die leere Variante `<Response/>` würde den Anruf sofort
-   beenden — der TwiML-Ack hält den Anruf offen.
+   <Pause length="35"/></Response>`. `<Say>` gibt direkt Feedback; `<Pause>`
+   hält den Call danach still offen, bis das Ergebnis eingespielt wird. Die
+   Pausenlänge kommt aus `voice.ackPauseSeconds` (`35` ist der Default).
 4. Parallel läuft der konfigurierte Befehl via `child_process.execFile`
    (keine Shell, wie überall sonst).
 5. Wenn der Befehl fertig ist, ruft der Service
@@ -532,11 +535,18 @@ am Tag lohnt sich ein Blick auf die Twilio-Abrechnung.
 Voice-HTTP-Server startet dann nicht mehr, WhatsApp und SMS laufen
 unverändert.
 
+Für akzeptierte Anrufe muss die Pause länger als `security.timeoutMs` plus
+einige Sekunden REST-Puffer sein. Der Default `35` passt zum Standard-Timeout
+von 30 Sekunden. Höhere Werte halten den Call bei einem fehlgeschlagenen
+`calls.update` entsprechend länger offen und können zusätzliche Kosten
+verursachen.
+
 ### Voice-spezifische Gotchas
 
-- **Leeres `<Response/>` beendet den Anruf sofort.** Die
-  `voice`-Channel-Implementierung antwortet immer mit einem `<Say>`-
-  TwiML, damit der Anruf während der Befehlsausführung offen bleibt.
+- **Der Ack braucht `<Say>` plus `<Pause>`.** `<Say>` allein ist nach der
+  Ansage fertig; Twilio würde anschließend das TwiML-Dokument beenden und
+  auflegen. `<Pause>` hält den Call für `voice.ackPauseSeconds` offen, damit
+  `client.calls(callSid).update` das Ergebnis einspielen kann.
 - **`voice.command` muss zur Whitelist passen.** Service startet sonst
   nicht (fail-closed).
 - **Hot-Reload der Whitelist funktioniert, aber `voice.command`,
@@ -558,6 +568,12 @@ sudo git pull                 # oder neuen Tarball entpacken
 sudo bash scripts/install.sh  # idempotent — überschreibt nur was nötig ist
 sudo systemctl restart whatsapp-shell-bot
 ```
+
+> ⚠️ `install.sh` behält eine vorhandene `/opt/whatsapp-shell-bot/config.json`
+> bewusst unverändert. Nach einem Update mit neuen Funktionen (z.B. Voice)
+> deshalb `config.example.json` mit der bestehenden Konfiguration vergleichen
+> und neue Blöcke/Optionen manuell ergänzen. Fehlt der `voice`-Block, gilt der
+> Kanal als deaktiviert und auf `voice.httpPort` startet kein Listener.
 
 `install.sh` ist **idempotent**: Es überschreibt vorhandene Konfiguration
 nur, wenn du das explizit erlaubst.
@@ -758,6 +774,40 @@ bewusst **closed** — wenn SMS explizit angefordert wurde und nicht
 booten kann, startet der ganze Service nicht (sonst hätte der Admin
 stillschweigend nur noch WhatsApp).
 
+### Voice: „An application error has occurred"
+
+Die Ansage kommt von Twilio, wenn der **initiale Voice-Webhook** keine
+verwertbare 2xx-TwiML-Antwort liefert. Zuerst in Twilio unter
+**Monitor → Logs → Calls → Debug Events** den HTTP-Status prüfen:
+
+1. **502 / 504 / Fehler 11200:** Der Reverse-Proxy erreicht den lokalen
+   Voice-Server nicht. Prüfen:
+
+   ```bash
+   sudo systemctl --no-pager --full status whatsapp-shell-bot
+   sudo journalctl -u whatsapp-shell-bot -n 100 --no-pager
+   sudo ss -ltnp | grep ':3001'
+   ```
+
+   Im Journal muss `Voice-HTTP-Server lauscht auf
+   127.0.0.1:3001/voice/inbound` stehen. Fehlt der Listener, zuerst prüfen,
+   ob der aktuelle Code installiert ist und `/opt/whatsapp-shell-bot/config.json`
+   einen `voice`-Block mit `enabled: true` enthält. Bei Cloudflare Tunnel muss
+   der öffentliche Host auf `http://127.0.0.1:3001` zeigen.
+2. **403:** Im Journal nach `voice_signature_invalid` suchen. Die geloggte
+   `publicUrl` muss exakt Twilios Webhook-URL entsprechen. Danach
+   `X-Forwarded-Proto`, `X-Forwarded-Host`, unveränderten POST-Body und Auth
+   Token prüfen. `voice.validateSignature` nicht dauerhaft deaktivieren.
+3. **200, „Bitte warten" hörbar, aber kein Ergebnis:** Im Journal nach
+   `voice_ack_sent`, `command_result`, `voice_reply_sent` oder
+   `Voice-Antwort fehlgeschlagen` suchen. `13231`/`20404` bedeutet, dass der
+   Call vor der Ergebnis-Injektion beendet wurde. Für Befehle nahe am Timeout
+   `voice.ackPauseSeconds` passend erhöhen (maximal 600) oder einen schnelleren
+   Command verwenden.
+4. **Kein Voice-Logeintrag:** Twilio verwendet wahrscheinlich URL/Pfad oder
+   Methode falsch. Unter **A CALL COMES IN** muss der Webhook
+   `https://<domain>/voice/inbound` mit Methode **POST** stehen.
+
 ### Voice: Anruf wird sofort aufgelegt / kein TTS
 
 1. **Twilio-Konsole prüfen:** ist „A CALL COMES IN" auf die richtige
@@ -772,10 +822,11 @@ stillschweigend nur noch WhatsApp).
    `voice.command: "xyz"`: prüfen, ob `"xyz"` exakt in
    `whitelist.commands` steht. Fail-closed: der Service bootet nicht
    bei Tippfehlern.
-5. **TTS kommt nicht an:** wenn der Anrufer auflegt, bevor der Befehl
-   fertig ist, ist das normal (siehe `voice_reply_sent` fehlt im Log).
-   Für längere Befehle `security.timeoutMs` niedriger setzen oder
-   `voice.command` durch einen schnelleren Befehl ersetzen.
+5. **TTS kommt nicht an:** wenn der Anrufer auflegt oder
+   `voice.ackPauseSeconds` abläuft, bevor der Befehl fertig ist, ist der Call
+   bereits beendet (siehe `voice_reply_sent` fehlt im Log). Für längere
+   Befehle die Ack-Pause passend erhöhen, `security.timeoutMs` niedriger
+   setzen oder `voice.command` durch einen schnelleren Befehl ersetzen.
 
 ---
 

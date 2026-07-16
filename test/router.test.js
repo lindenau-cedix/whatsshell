@@ -35,7 +35,11 @@ function makeMsg({ channel = 'whatsapp', from = '491701234567', body = '' } = {}
     from,
     body,
     replyCalls: [],
+    acceptedCalls: 0,
     metadata: {},
+    async onAccepted() {
+      obj.acceptedCalls += 1;
+    },
     async reply(text) {
       obj.replyCalls.push(text);
     },
@@ -53,6 +57,7 @@ test('router: ignores unknown numbers without replying', async () => {
   const msg = makeMsg({ from: '499999999999', body: 'printf hi' });
   await router.handleMessage(msg);
   assert.strictEqual(msg.replyCalls.length, 0);
+  assert.strictEqual(msg.acceptedCalls, 0);
 });
 
 test('router: ignores unknown commands without replying', async () => {
@@ -60,6 +65,7 @@ test('router: ignores unknown commands without replying', async () => {
   const msg = makeMsg({ from: '491701234567', body: 'rm -rf /' });
   await router.handleMessage(msg);
   assert.strictEqual(msg.replyCalls.length, 0);
+  assert.strictEqual(msg.acceptedCalls, 0);
 });
 
 test('router: ignores multiline messages', async () => {
@@ -67,15 +73,29 @@ test('router: ignores multiline messages', async () => {
   const msg = makeMsg({ from: '491701234567', body: 'printf hi\nrm -rf /' });
   await router.handleMessage(msg);
   assert.strictEqual(msg.replyCalls.length, 0);
+  assert.strictEqual(msg.acceptedCalls, 0);
 });
 
 test('router: executes whitelisted command and replies', async () => {
   const router = createRouter(CFG);
   const msg = makeMsg({ from: '491701234567', body: 'printf hi' });
   await router.handleMessage(msg);
+  assert.strictEqual(msg.acceptedCalls, 1);
   assert.strictEqual(msg.replyCalls.length, 1);
   assert.ok(msg.replyCalls[0].includes('OK'));
   assert.ok(msg.replyCalls[0].includes('hi'));
+});
+
+test('router: accepted hook failure prevents command execution and reply', async () => {
+  const router = createRouter(CFG);
+  const msg = makeMsg({ from: '491701234567', body: 'printf hi' });
+  msg.onAccepted = async () => {
+    throw new Error('transport unavailable');
+  };
+
+  await router.handleMessage(msg);
+
+  assert.strictEqual(msg.replyCalls.length, 0);
 });
 
 test('router: hot-reload swaps config without restart', async () => {

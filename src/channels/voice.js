@@ -8,7 +8,7 @@
  *        → POST /voice/inbound (this server, bound to 127.0.0.1)
  *        → validateRequest() — reject 403 on bad signature
  *        → normalise From, look up the configured `voice.command`
- *        → respond 200 with a <Say> ack TwiML (keeps the call alive!)
+ *        → respond 200 with a <Say> + <Pause> ack TwiML
  *        → run the configured command via the router (channel='voice')
  *        → when the command finishes, inject the result TwiML into the live
  *          call via client.calls(callSid).update({ twiml })
@@ -17,8 +17,8 @@
  * the real reply rides an async REST call. For SMS the reply is a fresh
  * outbound SMS; for voice it's a TwiML injection into the same call leg,
  * which means the call must STAY ALIVE between the webhook ack and the
- * reply. That's why the ack TwiML is a <Say> envelope, NOT an empty
- * <Response/> — empty TwiML would hang up before our reply arrives.
+ * reply. The <Say> gives immediate feedback; the following <Pause> holds
+ * the call open until calls.update() replaces it with the result TwiML.
  *
  * Decision: we always reply with one fixed command (cfg.voice.command).
  * The user's wording was "a specific command should run" — no speech-to-
@@ -40,6 +40,38 @@ const twilio = require('twilio');
 
 const { getLogger } = require('../logger');
 const { normaliseFrom, buildPublicUrl } = require('./sms');
+
+const DEFAULT_ACK_PAUSE_SECONDS = 35;
+const MAX_ACK_PAUSE_SECONDS = 600;
+
+/**
+ * Keep the initial TwiML pause bounded and valid. Invalid values fall back to
+ * the default rather than producing malformed TwiML at request time.
+ */
+function normaliseAckPauseSeconds(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_ACK_PAUSE_SECONDS;
+  }
+  const seconds = Math.trunc(value);
+  if (seconds < 1) return DEFAULT_ACK_PAUSE_SECONDS;
+  return Math.min(seconds, MAX_ACK_PAUSE_SECONDS);
+}
+
+/**
+ * Build the immediate response TwiML. Accepted calls include a Pause because
+ * Twilio ends the call after the document has finished; malformed calls do
+ * not wait because no result will be injected later.
+ */
+function buildAckTwiml(pauseSeconds) {
+  const pause = pauseSeconds
+    ? `<Pause length="${pauseSeconds}"/>`
+    : '';
+  return '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Response>' +
+    '<Say voice="alice" language="de-DE">Bitte warten.</Say>' +
+    pause +
+    '</Response>';
+}
 
 /**
  * Escape characters that would otherwise break the surrounding TwiML XML.
@@ -78,13 +110,17 @@ function createVoiceApp(cfg, router, twilioClient) {
   if (!voiceCfg.command || typeof voiceCfg.command !== 'string') {
     throw new Error('Voice-Kanal aktiviert, aber voice.command fehlt in config.json.');
   }
+  const voiceCommand = voiceCfg.command.trim();
+  if (!voiceCommand) {
+    throw new Error('Voice-Kanal aktiviert, aber voice.command ist leer.');
+  }
   const matched = (cfg.whitelist && Array.isArray(cfg.whitelist.commands)
     ? cfg.whitelist.commands
     : []
-  ).some((c) => c && typeof c.command === 'string' && c.command === voiceCfg.command);
+  ).some((c) => c && typeof c.command === 'string' && c.command === voiceCommand);
   if (!matched) {
     throw new Error(
-      `voice.command "${voiceCfg.command}" ist nicht in whitelist.commands. ` +
+      `voice.command "${voiceCommand}" ist nicht in whitelist.commands. ` +
         'Bitte in config.json eintragen.'
     );
   }
@@ -96,6 +132,7 @@ function createVoiceApp(cfg, router, twilioClient) {
   const httpHost = voiceCfg.httpHost || '127.0.0.1';
   const validateSignature = voiceCfg.validateSignature !== false;
   const ratePerMinute = voiceCfg.rateLimitPerMinute || 30;
+  const ackPauseSeconds = normaliseAckPauseSeconds(voiceCfg.ackPauseSeconds);
 
   const client = twilioClient || twilio(voiceCfg.twilioAccountSid, voiceCfg.twilioAuthToken);
 
@@ -128,15 +165,11 @@ function createVoiceApp(cfg, router, twilioClient) {
     }
   }
 
-  // -- Ack TwiML — must keep the call alive -------------------------------
-  // Empty <Response/> would hang up the call before our reply arrives.
-  // A short <Say> gives the caller audio feedback (~1.5s) and blocks the
-  // call-progress timer long enough for typical commands; longer commands
-  // still queue cleanly via client.calls(callSid).update({ twiml }).
-  const ACK_TWIML = '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<Response>' +
-    '<Say voice="alice" language="de-DE">Bitte warten.</Say>' +
-    '</Response>';
+  // -- Ack TwiML — keep accepted calls alive -------------------------------
+  // <Say> alone is not enough: Twilio proceeds to the end of the TwiML and
+  // ends the call. The Pause gives calls.update() a live call leg to replace.
+  const ACK_TWIML = buildAckTwiml(ackPauseSeconds);
+  const SHORT_ACK_TWIML = buildAckTwiml();
 
   // -- Outbound voice reply closure ---------------------------------------
   function buildOutboundReply(callSid) {
@@ -199,24 +232,37 @@ function createVoiceApp(cfg, router, twilioClient) {
 
     if (!from || !callSid) {
       logger.warn('voice_malformed', { hasFrom: !!from, hasCallSid: !!callSid });
-      // Ack with the same <Say> envelope — gives a tiny audio cue, then hangs up.
-      return res.status(200).type('text/xml').send(ACK_TWIML);
+      // Give a short audio cue, then hang up; no result will follow.
+      return res.status(200).type('text/xml').send(SHORT_ACK_TWIML);
     }
 
-    // Ack immediately so Twilio doesn't time out the webhook. The real
-    // reply rides on the still-live call via client.calls(callSid).update().
-    res.status(200).type('text/xml').send(ACK_TWIML);
+    // Let the router validate the number and command before sending the held
+    // ack. Rejected calls receive a short response after handleMessage returns.
+    let accepted = false;
 
     try {
       await router.handleMessage({
         channel: 'voice',
         from,
-        body: voiceCfg.command,
+        body: voiceCommand,
         reply: buildOutboundReply(callSid),
         metadata: { callSid },
+        async onAccepted() {
+          res.status(200).type('text/xml').send(ACK_TWIML);
+          accepted = true;
+          logger.info('voice_ack_sent', { callSid, from, pauseSeconds: ackPauseSeconds });
+        },
       });
+      if (!accepted && !res.headersSent) {
+        res.status(200).type('text/xml').send(SHORT_ACK_TWIML);
+      }
     } catch (err) {
       logger.error(`Fehler im Voice-Handler: ${err.message}`, { stack: err.stack });
+      if (!res.headersSent) {
+        // A non-2xx response makes Twilio play its generic application-error
+        // prompt. Return valid short TwiML while keeping the failure logged.
+        res.status(200).type('text/xml').send(SHORT_ACK_TWIML);
+      }
     }
   });
 
@@ -271,4 +317,6 @@ module.exports = {
   createVoiceApp,
   createVoiceChannel,
   escapeXml,
+  buildAckTwiml,
+  normaliseAckPauseSeconds,
 };
